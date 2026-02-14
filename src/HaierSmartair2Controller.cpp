@@ -121,7 +121,6 @@ HandlerError HaierSmartair2Controller::handleStatusAnswer_(
     ac_mode_ = static_cast<ConditioningMode>(status.control.ac_mode);
     set_point_ = static_cast<float>(status.control.set_point) + 16.0f; // 16°C offset
     fan_mode_ = static_cast<FanMode>(status.control.fan_mode);
-    swing_both_ = (status.control.swing_both != 0);
     use_swing_bits_ = (status.control.use_swing_bits != 0);
     horizontal_swing_ = (status.control.horizontal_swing != 0);
     vertical_swing_ = (status.control.vertical_swing != 0);
@@ -153,7 +152,6 @@ HandlerError HaierSmartair2Controller::handleStatusAnswer_(
     if (((status.control.health_mode != 0) != health_mode_)) applied = false;
     if (((status.control.ten_degree != 0) != ten_degree_)) applied = false;
     if (((status.control.use_swing_bits != 0) != use_swing_bits_)) applied = false;
-    if (((status.control.swing_both != 0) != swing_both_)) applied = false;
     if (((status.control.horizontal_swing != 0) != horizontal_swing_)) applied = false;
     if (((status.control.vertical_swing != 0) != vertical_swing_)) applied = false;
 
@@ -208,14 +206,6 @@ void HaierSmartair2Controller::setFanMode(Supla::haier::smartair2_protocol::FanM
   sendStatusRequest_();
   getControlMessage();
   fan_mode_ = mode;
-  pending_settings_.valid = true;
-  control_attempts_ = 0;
-  sendControlNow();
-}
-void HaierSmartair2Controller::setSwingBoth(bool both) {
-  sendStatusRequest_();
-  getControlMessage();
-  swing_both_ = both;
   pending_settings_.valid = true;
   control_attempts_ = 0;
   sendControlNow();
@@ -323,7 +313,6 @@ haier_protocol::HaierMessage HaierSmartair2Controller::getControlMessage() {
   out_data->fan_mode = static_cast<uint8_t>(fan_mode_);
 
   // Swing and swing bits
-  out_data->swing_both = swing_both_ ? 1 : 0;
   out_data->use_swing_bits = use_swing_bits_ ? 1 : 0;
   out_data->horizontal_swing = horizontal_swing_ ? 1 : 0;
   out_data->vertical_swing = vertical_swing_ ? 1 : 0;
@@ -427,7 +416,7 @@ void HaierSmartair2Controller::logPacketDiff(const uint8_t *pkt, size_t len) {
     snprintf(tmp, sizeof(tmp), "%02X ", pkt[i]);
     full.append(tmp);
   }
-  SUPLA_LOG_DEBUG("HAIER PKT: %s", full.c_str());
+  SUPLA_LOG_DEBUG("HAIER  PKT: %s", full.c_str());
 
   // Build diff line: '.' for same, hex for changed
   std::string diff;
@@ -435,7 +424,7 @@ void HaierSmartair2Controller::logPacketDiff(const uint8_t *pkt, size_t len) {
   for (size_t i = 0; i < len; ++i) {
     bool same = (i < last_raw_packet_.size() && last_raw_packet_[i] == pkt[i]);
     if (same) {
-      diff.append(".  ");
+      diff.append(".. ");
     } else {
       snprintf(tmp, sizeof(tmp), "%02X ", pkt[i]);
       diff.append(tmp);
@@ -452,8 +441,6 @@ Supla::haier::smartair2_protocol::ConditioningMode HaierSmartair2Controller::get
 } 
 
 uint8_t HaierSmartair2Controller::getRoomHumidity() const { return room_humidity_; }
-
-bool HaierSmartair2Controller::getSwingBoth() const { return swing_both_; }
 
 bool HaierSmartair2Controller::getUseSwingBits() const { return use_swing_bits_; }
 

@@ -46,7 +46,6 @@ class HaierSmartair2Controller {
     void increaseTargetTemperatureC(bool increase);
     void setACMode(Supla::haier::smartair2_protocol::ConditioningMode mode);
     void setFanMode(Supla::haier::smartair2_protocol::FanMode mode);
-    void setSwingBoth(bool both);
     void setUseSwingBits(bool use_bits);
     void setHorizontalSwing(bool h);
     void setVerticalSwing(bool v);
@@ -64,7 +63,6 @@ class HaierSmartair2Controller {
     Supla::haier::smartair2_protocol::FanMode getFanMode() const;
     Supla::haier::smartair2_protocol::ConditioningMode getACMode() const;
     uint8_t getRoomHumidity() const;
-    bool getSwingBoth() const;
     bool getUseSwingBits() const;
     bool getHorizontalSwing() const;
     bool getVerticalSwing() const;
@@ -105,7 +103,6 @@ class HaierSmartair2Controller {
   uint8_t room_humidity_ = 0;
   Supla::haier::smartair2_protocol::FanMode fan_mode_ =
       Supla::haier::smartair2_protocol::FanMode::FAN_AUTO;
-  bool swing_both_ = false;
   bool use_swing_bits_ = false;
   bool horizontal_swing_ = false;
   bool vertical_swing_ = false;
@@ -135,7 +132,6 @@ class HaierSmartair2Controller {
         Supla::haier::smartair2_protocol::FanMode fan_mode =
                 Supla::haier::smartair2_protocol::FanMode::FAN_AUTO;
         float set_point = NAN;
-        bool swing_both = false;
         bool use_swing_bits = false;
         bool horizontal_swing = false;
         bool vertical_swing = false;
