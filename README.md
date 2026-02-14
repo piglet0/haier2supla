@@ -2,13 +2,14 @@
 Implementation of HaierProtocol in Supla device. This is code for ESP32 to control Haier AC device via Supla. Current version is compatibile with SmartAir2 devices.
 ## Base of the project - references
 Communication to Haier AC is developed by paveldn. HaierProtocol library is a direct port of his code to Arduino IDE. Communication with Haier AC is based on his other project haier-esphome.
+- Supla-Device https://github.com/SUPLA/supla-device
 - HaierProtocol https://github.com/paveldn/HaierProtocol
 - Haier-esphome https://github.com/paveldn/haier-esphome
 ## Hardware requirements
 ### Communication with Haier AC
 Haier AC communicate using standard UART serial. Units which uses SmartAir2 app connects UART using standard USB plug. For more information please refer to https://github.com/paveldn/haier-esphome/blob/master/README.rst
 ### Tested version
-Code was tested on ESP32-C6 Super Mini board.
+Code was tested on ESP32-C6 Super Mini board. UART pins used: RX GPIO 14, TX GPIO 20. Those pins are not used for other functions. Status LED GPIO 15. Config button (BOOT) GPIO 9.
 ## Current status of the project
 Version 
 - Support of Haier AC in SmartAir2 version - units that uses SmartAir2 app. Hon protocol is not supported.
@@ -19,6 +20,7 @@ Version
 -- minimal - Cool/Heat mode only, Fan mode and temperature setting
 -- application - all AC modes, Fan modes and temperature setting
 -- debug - additional sensor channels showing state of AC functions
+Note that change of interface level requires removing device from supla cloud and registration with new channels.
 # Compilation
 Project was compiled in VSCode with Arduino Maker pluggin. It can be also compiled in Arduino IDE.
 ## Libraries
@@ -26,5 +28,7 @@ Project requries following libriaries to be installed:
 - Supla-device - from the Arduino catalogue
 - HaierProtocol - from the included ZIP file
 ## Compilation settings
+- USB CDC On Boot: Enabled - to allow Logs displayed in board USB serial (115200 bound rate)
+- Partition scheme: Huge APP (3MB No OTA, 1MB SPIFFS)
 
 - 
