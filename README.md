@@ -17,12 +17,12 @@ Version
 - Working functions: On/Off, AC Mode, Fan Mode, Room temperature sensor, Setting of room temperature, Health mode, Display On/Off
 - UART pins can be set via web config
 - Interface can be set via web config to:
--- minimal - Cool/Heat mode only, Fan mode and temperature setting
--- application - all AC modes, Fan modes and temperature setting
--- debug - additional sensor channels showing state of AC functions
+  - minimal - Cool/Heat mode only, Fan mode and temperature setting
+  - application - all AC modes, Fan modes and temperature setting
+  - debug - additional sensor channels showing state of AC functions
 Note that change of interface level requires removing device from supla cloud and registration with new channels.
 # Compilation
-Project was compiled in VSCode with Arduino Maker pluggin. It can be also compiled in Arduino IDE.
+Project was compiled in VSCode with Arduino Maker plugin. It can be also compiled in Arduino IDE.
 ## Libraries
 Project requries following libriaries to be installed:
 - Supla-device - from the Arduino catalogue
@@ -30,5 +30,7 @@ Project requries following libriaries to be installed:
 ## Compilation settings
 - USB CDC On Boot: Enabled - to allow Logs displayed in board USB serial (115200 bound rate)
 - Partition scheme: Huge APP (3MB No OTA, 1MB SPIFFS)
+## release
+Compiled bin file for ESP32-C6 super mini board (LED GPIO15, BOOT button GPIO9)
 
 - 
