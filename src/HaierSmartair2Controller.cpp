@@ -37,42 +37,34 @@ void HaierSmartair2Controller::begin() {
                 std::placeholders::_3,
                 std::placeholders::_4));
 
-    // Timeout handler for CONTROL messages: allow controller-level retries
-    protocol_.set_timeout_handler(
-      FrameType::CONTROL,
-      std::bind(&HaierSmartair2Controller::controlTimeoutHandler_, this, std::placeholders::_1));
-
-    // Fetch first status immediately to avoid stale default mode/fan states.
-    sendStatusRequest_();
-    last_status_request_ = std::chrono::steady_clock::now();
-}
-
-HandlerError HaierSmartair2Controller::controlTimeoutHandler_(FrameType request_type) {
-  // Called when protocol-level retries for CONTROL are exhausted for one send.
-  if (!pending_settings_.valid) {
-    return HandlerError::HANDLER_OK;
-  }
-
-  if (control_attempts_ < max_control_attempts_) {
-    // Try sending control again (controller-level retry)
-    sendControlNow();
-  } else {
-    // Exhausted attempts — give up and clear pending
-    pending_settings_.valid = false;
-    control_attempts_ = 0;
-  }
-  return HandlerError::HANDLER_OK;
+  // Fetch first status immediately to avoid stale default mode/fan states.
+  sendStatusRequest_();
+  last_status_request_ = std::chrono::steady_clock::now();
 }
 
 void HaierSmartair2Controller::loop() {
   protocol_.loop();
+
+  if (pending_settings_.valid && !control_send_requested_ &&
+      !protocol_.is_waiting_for_answer() &&
+      protocol_.get_outgoing_queue_size() == 0) {
+    if (has_last_status_message_) {
+      sendControlNow();
+      control_send_requested_ = true;
+    } else {
+      sendStatusRequest_();
+      last_status_request_ = std::chrono::steady_clock::now();
+    }
+  }
 
   auto now = std::chrono::steady_clock::now();
   auto elapsed =
       std::chrono::duration_cast<std::chrono::milliseconds>(now - last_status_request_);
 
   // Request AC status every 1 seconds
-  if (elapsed.count() > 1000) {
+  if (elapsed.count() > 1000 &&
+      !protocol_.is_waiting_for_answer() &&
+      protocol_.get_outgoing_queue_size() == 0) {
     sendStatusRequest_();
     last_status_request_ = now;
   }
@@ -169,11 +161,18 @@ HandlerError HaierSmartair2Controller::handleStatusAnswer_(
 
     if (applied) {
       pending_settings_.valid = false;
-      control_attempts_ = 0;
+      control_send_requested_ = false;
+    } else {
+      control_send_requested_ = false;
     }
   }
 
   return HandlerError::HANDLER_OK;
+}
+
+void HaierSmartair2Controller::queueControlUpdate_() {
+  pending_settings_.valid = true;
+  control_send_requested_ = false;
 }
 
 // Setters — update cached fields directly (no pending_settings_)
@@ -185,14 +184,8 @@ void HaierSmartair2Controller::setTargetTemperatureC(float temp) {
   }
   // SmartAir2 setpoint has 1C resolution, keep internal cache aligned.
   temp = roundf(temp);
-  // Request latest status and construct baseline control packet first
-  sendStatusRequest_();
-  getControlMessage();
   set_point_ = temp;
-  // mark pending and send control for confirmation
-  pending_settings_.valid = true;
-  control_attempts_ = 0;
-  sendControlNow();
+  queueControlUpdate_();
 }
 
 void HaierSmartair2Controller::increaseTargetTemperatureC(bool increase) {
@@ -202,100 +195,58 @@ void HaierSmartair2Controller::increaseTargetTemperatureC(bool increase) {
 }
 
 void HaierSmartair2Controller::setACMode(Supla::haier::smartair2_protocol::ConditioningMode mode) {
-  sendStatusRequest_();
-  getControlMessage();
   ac_mode_ = mode;
-  pending_settings_.valid = true;
-  control_attempts_ = 0;
-  sendControlNow();
+  if (mode == Supla::haier::smartair2_protocol::ConditioningMode::AUTO) {
+    fan_mode_ = Supla::haier::smartair2_protocol::FanMode::FAN_AUTO;
+  } else if (mode == Supla::haier::smartair2_protocol::ConditioningMode::FAN &&
+             fan_mode_ == Supla::haier::smartair2_protocol::FanMode::FAN_AUTO) {
+    fan_mode_ = Supla::haier::smartair2_protocol::FanMode::FAN_LOW;
+  }
+  queueControlUpdate_();
 }
 void HaierSmartair2Controller::setFanMode(Supla::haier::smartair2_protocol::FanMode mode) {
-  sendStatusRequest_();
-  getControlMessage();
   fan_mode_ = mode;
-  pending_settings_.valid = true;
-  control_attempts_ = 0;
-  sendControlNow();
+  queueControlUpdate_();
 }
 void HaierSmartair2Controller::setUseSwingBits(bool use_bits) {
-  sendStatusRequest_();
-  getControlMessage();
   use_swing_bits_ = use_bits;
-  pending_settings_.valid = true;
-  control_attempts_ = 0;
-  sendControlNow();
+  queueControlUpdate_();
 }
 void HaierSmartair2Controller::setHorizontalSwing(bool h) {
-  sendStatusRequest_();
-  getControlMessage();
   horizontal_swing_ = h;
-  pending_settings_.valid = true;
-  control_attempts_ = 0;
-  sendControlNow();
+  queueControlUpdate_();
 }
 void HaierSmartair2Controller::setVerticalSwing(bool v) {
-  sendStatusRequest_();
-  getControlMessage();
   vertical_swing_ = v;
-  pending_settings_.valid = true;
-  control_attempts_ = 0;
-  sendControlNow();
+  queueControlUpdate_();
 }
 void HaierSmartair2Controller::setTurbo(bool on) {
-  sendStatusRequest_();
-  getControlMessage();
   turbo_mode_ = on;
-  pending_settings_.valid = true;
-  control_attempts_ = 0;
-  sendControlNow();
+  queueControlUpdate_();
 }
 void HaierSmartair2Controller::setQuiet(bool on) {
-  sendStatusRequest_();
-  getControlMessage();
   quiet_mode_ = on;
-  pending_settings_.valid = true;
-  control_attempts_ = 0;
-  sendControlNow();
+  queueControlUpdate_();
 }
 void HaierSmartair2Controller::setDisplayStatus(bool on) {
-  sendStatusRequest_();
-  getControlMessage();
   display_status_ = on;
-  pending_settings_.valid = true;
-  control_attempts_ = 0;
-  sendControlNow();
+  queueControlUpdate_();
 }
 void HaierSmartair2Controller::setUseFahrenheit(bool on) {
-  sendStatusRequest_();
-  getControlMessage();
   use_fahrenheit_ = on;
-  pending_settings_.valid = true;
-  control_attempts_ = 0;
-  sendControlNow();
+  queueControlUpdate_();
 }
 void HaierSmartair2Controller::setLockRemote(bool on) {
-  sendStatusRequest_();
-  getControlMessage();
   lock_remote_ = on;
-  pending_settings_.valid = true;
-  control_attempts_ = 0;
-  sendControlNow();
+  queueControlUpdate_();
 }
 void HaierSmartair2Controller::setHealthMode(bool on) {
-  sendStatusRequest_();
-  getControlMessage();
   health_mode_ = on;
-  pending_settings_.valid = true;
-  control_attempts_ = 0;
-  sendControlNow();
+  queueControlUpdate_();
 }
 void HaierSmartair2Controller::setTenDegree(bool on) {
-  sendStatusRequest_();
-  getControlMessage();
   ten_degree_ = on;
-  pending_settings_.valid = true;
-  control_attempts_ = 0;
-  sendControlNow();
+  queueControlUpdate_();
 }
 
 haier_protocol::HaierMessage HaierSmartair2Controller::getControlMessage() {
@@ -346,18 +297,13 @@ haier_protocol::HaierMessage HaierSmartair2Controller::getControlMessage() {
 void HaierSmartair2Controller::sendControlNow() {
   // Build CONTROL message from last status + pending settings and send it.
   if (!has_last_status_message_) {
-    // Request status and return; caller should retry after status received.
-    sendStatusRequest_();
     return;
   }
 
   haier_protocol::HaierMessage msg = getControlMessage();
-  // If there is a pending user change, keep it pending and track attempts.
   if (pending_settings_.valid) {
-    control_attempts_++;
     protocol_.send_message(msg, use_crc_, /*num_retries=*/2, control_retry_interval_);
   } else {
-    // No confirmation required — send normally.
     protocol_.send_message(msg, use_crc_);
   }
 }

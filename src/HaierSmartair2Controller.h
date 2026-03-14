@@ -126,6 +126,9 @@ class HaierSmartair2Controller {
     // Log packet and show changed bytes compared to previous packet
     void logPacketDiff(const uint8_t *pkt, size_t len);
 
+    // Queue a control update using the current cached state.
+    void queueControlUpdate_();
+
     // Pending settings (setters write here, applied when sending control)
     struct PendingHvacSettings {
         bool valid = false;
@@ -146,14 +149,10 @@ class HaierSmartair2Controller {
         bool ten_degree = false;
     } pending_settings_;
 
+    bool control_send_requested_ = false;
+
     // Send CONTROL now built from last status + pending settings
     void sendControlNow();
 
-    // Control confirmation bookkeeping
-    uint8_t control_attempts_ = 0;
-    const uint8_t max_control_attempts_ = 3;
     std::chrono::milliseconds control_retry_interval_{500};
-
-    // Timeout handler for CONTROL messages (called by protocol layer)
-    haier_protocol::HandlerError controlTimeoutHandler_(haier_protocol::FrameType request_type);
 };
