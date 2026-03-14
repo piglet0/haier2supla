@@ -1,18 +1,30 @@
 # Project goal
-Library Haier2Supla allowing use of Haier AC in Supla-Device
+- Firmware for the ESP32 device working as Supla device which allows control of Haier AC in Supla IoT environment
 
-# Code base
+## Key technical informations
+- Haier AC has UART interface which is used by Haier wifi dongle to control AC
+- Communication of the wifi dongle and AC unit is using HaierProtocol
+- Wifi dongle changes only functions in the same way as remote controll. Whole AC automation and logic is done by the unit itself.
+- Wifi dongle can read state of the AC via UART e.g. room temperature, working functions etc.
+
+## Code base
 - Supla-device https://github.com/SUPLA/supla-device
-- HaierProtocol - subfolder of the project
-- Haier2Supla - subfolder with a new library
+- HaierProtocol - https://github.com/paveldn/HaierProtocol
 
-# Inspiration for the code. Use of the same idea for another iot platform esphome instead of Supla
-- HaierProtocol https://github.com/paveldn/HaierProtocol
-- Haier-esphome https://github.com/paveldn/haier-esphome
-- Esphome https://github.com/esphome/esphome
+## Additional instructions
+- Firmware should utilize HaierProtocol as much as reasonable not to double same functions in the code
+
+# reference information for inspiration how functions may be implemented
+## inspiration for use of HVAC channel base on Zigbee to Supla
+- Z2S library https://github.com/lsroka76/Z2S_Library/tree/main
+Z2S is Zigbee to Supla gateway. It supports use of Zigbee Thermostats. It reads or writhes thermostat via Zigbee and synchronises it with Supla channel of HVAC type. So HVAC channel works as remote control not as a full AC logic. Cooling or heating automation logic is a default functionionality of HVAC supla channel.
+
+## Inspiration for the code. Use of the remote control of haier ac by another iot platform esphome instead of Supla
+- Haier-esphome implementation of HaierProtocol for EspHome https://github.com/paveldn/haier-esphome
+- Esphome as reference for Haier-esphome https://github.com/esphome/esphome
 
 # Required functions
-Library should control all Haier AC functions. Library should also help to establish controll channels in Supla-Device.
+Defice should control all Haier AC functions. Controll is using channels in Supla-Device.
 AC unit uses SmartAir2 Haier protocol.
 Control of AC functions is simillar to use of remote control. HVAC control is done by the AC unit itself.
 
@@ -22,10 +34,28 @@ Control of AC functions is simillar to use of remote control. HVAC control is do
 - Fan mode - High, Mid, Low, Auto
 - Swing vertical ON/OFF
 - Swing horizontal ON/OFF
-- Health ON/OFF
-- Room themperature sensor reading
-- Pipe themperature sensor reading (optional)
+- Health mode ON/OFF
+- Quite mode ON/OFF
+- Room themperature and humidity sensor reading
 - Required themperature setting 16oC to 30oC
 - Display ON/OFF
-- SelfCleaning ON/OFF
-- AC test ON/OFF
+
+## functions controled by HVAC supla channel
+### first version
+- Power ON/OFF
+- Required themperature setting 16oC to 30oC despite of chosen AC mode
+- AC mode is controlled outside of this channel. Channel should not block use of AC modes settings
+### expanded version
+- Power ON/OFF
+- Required themperature setting 16oC to 30oC despite of chosen AC mode
+- Option to choose heat or cool mode
+- Choise of the heat/cool mode should not block use of remaining ac modes. If e.g. Dry mode is set outside this channel, channel should still enable setting of required temperature.
+
+## Supla device specific functions
+- Device name should be set to Haier2Supla_XXXX where XXXX is last 3 digits of MAC address or anhother unique ESP32 identivicator
+- Boot board button should work as config button in supla
+- HAIER UART pins should be defined in WEB interface
+- Boot button pins shoud be defined in WEB interface
+- LED pin should be defined in WEB interface
+- Room name should be defined in the WEB interface. Room name is a prefix for all supla channels of the device
+- Level of interface should be defined in WEB interface: Minimal, Standard, Debug. Those levels defines what and how many channels/functions are added to the device. Add a note in the WEB interface that change of interface level requires removing and adding device to supla.org cloud

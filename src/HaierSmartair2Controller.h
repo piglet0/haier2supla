@@ -3,8 +3,9 @@
 
 #include <Arduino.h>
 #include <chrono>
-#include <protocol_stream.h>
-#include <haier_protocol.h>
+#include <HaierProtocol.h>
+#include <protocol/haier_protocol.h>
+#include <utils/protocol_stream.h>
 #include "HaierSerialStream.h"
 #include "smartair2_packet.h"
 #include <array>
@@ -30,6 +31,7 @@ class HaierSmartair2Controller {
   // Switch AC power via SmartAir2 CONTROL messages
   void setPower(bool on);
   bool getPower() const { return power_state_; }
+    bool hasStatus() const { return has_last_status_message_; }
   float getRoomTemperatureC() const;
   bool getModeCool() const;
     bool getModeHeat() const;

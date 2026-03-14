@@ -42,6 +42,8 @@ void HaierSmartair2Controller::begin() {
       FrameType::CONTROL,
       std::bind(&HaierSmartair2Controller::controlTimeoutHandler_, this, std::placeholders::_1));
 
+    // Fetch first status immediately to avoid stale default mode/fan states.
+    sendStatusRequest_();
     last_status_request_ = std::chrono::steady_clock::now();
 }
 
@@ -82,9 +84,8 @@ void HaierSmartair2Controller::sendStatusRequest_() {
 }
 
 void HaierSmartair2Controller::setPower(bool on) {
-  if (on == power_state_) {
-    return;
-  }
+  // Always send power command even if local cache already matches.
+  // Cache can be stale when packets were missed.
   power_state_ = on;
   const uint16_t subcommand = on ? 0x4D02 : 0x4D03;
   HaierMessage msg(FrameType::CONTROL, subcommand);
@@ -113,13 +114,18 @@ HandlerError HaierSmartair2Controller::handleStatusAnswer_(
   // Update cached values from AC. Always update live measurements (room temp,
   // power) but avoid overriding user-requested pending settings.
   room_temperature_c_ = static_cast<float>(status.control.room_temperature);
+  // Some units report room temperature with 0.1C scale in this field.
+  // Normalize obviously out-of-range values to human-readable Celsius.
+  if (room_temperature_c_ > 80.0f) {
+    room_temperature_c_ /= 10.0f;
+  }
   power_state_ = (status.control.ac_power != 0);
   compressor_ = (status.control.compressor != 0);
   room_humidity_ = status.control.room_humidity;
   // Only update reported control fields if there is no pending user change.
   if (!pending_settings_.valid) {
     ac_mode_ = static_cast<ConditioningMode>(status.control.ac_mode);
-    set_point_ = static_cast<float>(status.control.set_point) + 16.0f; // 16°C offset
+    set_point_ = decodeSetPointC(status.control.set_point);
     fan_mode_ = static_cast<FanMode>(status.control.fan_mode);
     use_swing_bits_ = (status.control.use_swing_bits != 0);
     horizontal_swing_ = (status.control.horizontal_swing != 0);
@@ -156,7 +162,7 @@ HandlerError HaierSmartair2Controller::handleStatusAnswer_(
     if (((status.control.vertical_swing != 0) != vertical_swing_)) applied = false;
 
     // Compare set-point (normalize packet offset + half-degree)
-    float reported_set = static_cast<float>(status.control.set_point) + 16.0f;
+    float reported_set = decodeSetPointC(status.control.set_point);
     if (!std::isnan(set_point_)) {
       if (std::fabs(reported_set - set_point_) > 0.25f) applied = false;
     }
@@ -172,12 +178,13 @@ HandlerError HaierSmartair2Controller::handleStatusAnswer_(
 
 // Setters — update cached fields directly (no pending_settings_)
 void HaierSmartair2Controller::setTargetTemperatureC(float temp) {
-  if (temp < 16.0f) {
-    temp = 16.0f;
-  } else if (temp > 30.0f) {
-    temp = 30.0f;
+  if (temp < kSetpointMinC) {
+    temp = kSetpointMinC;
+  } else if (temp > kSetpointMaxC) {
+    temp = kSetpointMaxC;
   }
-  // store in real degrees (e.g. 21.5). getControlMessage will convert to packet offset.
+  // SmartAir2 setpoint has 1C resolution, keep internal cache aligned.
+  temp = roundf(temp);
   // Request latest status and construct baseline control packet first
   sendStatusRequest_();
   getControlMessage();
@@ -317,10 +324,9 @@ haier_protocol::HaierMessage HaierSmartair2Controller::getControlMessage() {
   out_data->horizontal_swing = horizontal_swing_ ? 1 : 0;
   out_data->vertical_swing = vertical_swing_ ? 1 : 0;
 
-  // Temperature set point (packet uses 16°C offset)
+  // Temperature set point encoded with SmartAir2 offset.
   if (!std::isnan(set_point_)) {
-    int sp = static_cast<int>(set_point_ + 0.5f);
-    out_data->set_point = static_cast<uint8_t>(sp - 16);
+    out_data->set_point = encodeSetPointC(set_point_);
   }
 
   // Presets / modes
@@ -386,7 +392,7 @@ bool HaierSmartair2Controller::getFanAuto() const {
 }
 
 float HaierSmartair2Controller::getTargetTemperatureC() const {
-  // `set_point_` uses a 16°C offset in the packet format (see smartair2_packet.h)
+  // set_point_ is stored in Celsius (decoded from packet format).
   return set_point_;
 }
 

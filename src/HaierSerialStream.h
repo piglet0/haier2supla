@@ -3,7 +3,8 @@
 
 #include <Arduino.h>
 #include <HardwareSerial.h>
-#include <protocol_stream.h>
+#include <HaierProtocol.h>
+#include <utils/protocol_stream.h>
 
 // Simple logging shim for migrating Serial.* calls to SUPLA_LOG
 // All existing logs are treated as debug-level logs.

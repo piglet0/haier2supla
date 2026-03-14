@@ -1,7 +1,5 @@
 \
-#define STATUS_LED_GPIO 15
 #define AC_ROOM "Haier"
-#define BUTTON_CFG_GPIO 9
 
 
 #include <Arduino.h>
@@ -27,11 +25,12 @@
 #include <supla/events.h>
 
 #include <supla/sensor/virtual_thermometer.h>
+#include <supla/sensor/virtual_therm_hygro_meter.h>
 #include <supla/sensor/virtual_binary.h>
 #include "HaierSerialStream.h"
 #include "HaierSmartair2Controller.h"
 #include "HaierAcVirtualRelay.h"
-#include "HaierAcHvacChannel.h"
+// #include "HaierAcHvacChannel.h"
 #include "smartair2_packet.h"
 
 // SUPLA components
@@ -39,24 +38,31 @@ Supla::Eeprom eeprom;
 Supla::ESPWifi wifi;
 Supla::EspWebServer suplaServer;
 Supla::LittleFsConfig configSupla;
-Supla::Device::StatusLed statusLed(STATUS_LED_GPIO, false);  // not reversed state
+Supla::Device::StatusLed *statusLed = nullptr;
+Supla::Control::Button *buttonCfg = nullptr;
 
 // Configuration tags for custom parameters
 #define CFG_TAG_ROOM_NAME "room_name"
 #define CFG_TAG_RX_PIN "uart_rx_pin"
 #define CFG_TAG_TX_PIN "uart_tx_pin"
 #define CFG_TAG_INTERFACE_LEVEL "iface_level"
+#define CFG_TAG_LED_PIN "status_led_pin"
+#define CFG_TAG_BUTTON_PIN "cfg_button_pin"
 
 
 // Haier SmartAir2 over UART1
 HardwareSerial HaierSerial(1);
 
 // Default UART pin values (can be overridden from web config)
+constexpr uint8_t DEFAULT_STATUS_LED_PIN = 15;
+constexpr uint8_t DEFAULT_BUTTON_CFG_PIN = 9;
 constexpr uint8_t DEFAULT_HAIER_UART_RX_PIN = 14;
 constexpr uint8_t DEFAULT_HAIER_UART_TX_PIN = 20;
 constexpr uint32_t HAIER_UART_BAUD  = 9600;
 
 // Global variables for configurable pins (will be initialized from config)
+uint8_t statusLedPin = DEFAULT_STATUS_LED_PIN;
+uint8_t buttonCfgPin = DEFAULT_BUTTON_CFG_PIN;
 uint8_t haierUartRxPin = DEFAULT_HAIER_UART_RX_PIN;
 uint8_t haierUartTxPin = DEFAULT_HAIER_UART_TX_PIN;
 
@@ -83,9 +89,9 @@ Supla::Control::HaierVirtualRelay *haierSwingVerticalRelay = nullptr;
 Supla::Control::HaierVirtualRelay *haierHealthRelay = nullptr;
 Supla::Control::HaierVirtualRelay *haierDisplayRelay = nullptr;
 Supla::Control::HaierVirtualRelay *haierQuietRelay = nullptr;
-//Supla::Control::HaierAcHvacChannel *haierHvacChannel = nullptr;
+// Supla::Control::HaierAcHvacChannel *haierHvacChannel = nullptr;
 Supla::Sensor::VirtualBinary *haierPowerState = nullptr;
-Supla::Sensor::VirtualThermometer *haierTemperature = nullptr;
+Supla::Sensor::VirtualThermHygroMeter *haierTemperatureHumidity = nullptr;
 Supla::Control::HaierVirtualRelay *haierTempIncrease = nullptr;
 Supla::Sensor::VirtualThermometer *haierSetTemperature = nullptr;
 Supla::Sensor::VirtualBinary *haierModeCool = nullptr;
@@ -109,11 +115,70 @@ Supla::Sensor::VirtualBinary *haierHorizontalSwing = nullptr;
 Supla::Sensor::VirtualBinary *haierVerticalSwing = nullptr;
 // Supla::Sensor::GeneralPurposeMeasurement *haierModeString = nullptr; 
 
+static void buildMacSuffix(char *suffix, size_t suffixSize) {
+  const unsigned long long mac = static_cast<unsigned long long>(ESP.getEfuseMac());
+  snprintf(suffix, suffixSize, "%012llX", mac & 0xFFFFFFFFFFFFULL);
+}
+
+static void buildDefaultDeviceName(char *deviceName, size_t deviceNameSize) {
+  char macSuffix[13] = {};
+  buildMacSuffix(macSuffix, sizeof(macSuffix));
+  snprintf(deviceName, deviceNameSize, "Supla2Haier-%s", macSuffix);
+}
+
+static bool isLegacyAutoDeviceName(const char *deviceName) {
+  return strncmp(deviceName, "Haier2Supla_", 12) == 0;
+}
+
 void setup() {
   Serial.begin(115200);
   delay(100);
-// config button to reset WiFi and other settings
-  auto buttonCfg = new Supla::Control::Button(BUTTON_CFG_GPIO, true, true);
+
+  Supla::Storage::Init();
+  auto cfg = Supla::Storage::ConfigInstance();
+
+  char roomName[11] = {};
+  if (cfg && cfg->getString(CFG_TAG_ROOM_NAME, roomName, sizeof(roomName))) {
+    SUPLA_LOG_DEBUG("Loaded room name: %s", roomName);
+  } else {
+    strncpy(roomName, AC_ROOM, sizeof(roomName) - 1);
+  }
+
+  int32_t rxPin = DEFAULT_HAIER_UART_RX_PIN;
+  int32_t txPin = DEFAULT_HAIER_UART_TX_PIN;
+  int32_t ledPin = DEFAULT_STATUS_LED_PIN;
+  int32_t cfgPin = DEFAULT_BUTTON_CFG_PIN;
+  int32_t interfaceLvl = 1;
+  if (cfg) {
+    cfg->getInt32(CFG_TAG_RX_PIN, &rxPin);
+    cfg->getInt32(CFG_TAG_TX_PIN, &txPin);
+    cfg->getInt32(CFG_TAG_LED_PIN, &ledPin);
+    cfg->getInt32(CFG_TAG_BUTTON_PIN, &cfgPin);
+    cfg->getInt32(CFG_TAG_INTERFACE_LEVEL, &interfaceLvl);
+  }
+
+  statusLedPin = static_cast<uint8_t>(ledPin);
+  buttonCfgPin = static_cast<uint8_t>(cfgPin);
+  haierUartRxPin = static_cast<uint8_t>(rxPin);
+  haierUartTxPin = static_cast<uint8_t>(txPin);
+
+  char deviceName[SUPLA_DEVICE_NAME_MAXSIZE] = {};
+  const bool hasStoredDeviceName = cfg && cfg->getDeviceName(deviceName);
+  if (!hasStoredDeviceName || isLegacyAutoDeviceName(deviceName)) {
+    buildDefaultDeviceName(deviceName, sizeof(deviceName));
+    if (cfg) {
+      cfg->setDeviceName(deviceName);
+      cfg->commit();
+    }
+  }
+
+  SuplaDevice.setName(deviceName);
+  SuplaDevice.setCustomHostnamePrefix("SUPLA2HAIER");
+
+  statusLed = new Supla::Device::StatusLed(statusLedPin, false);
+
+  // config button to reset WiFi and other settings
+  buttonCfg = new Supla::Control::Button(buttonCfgPin, true, true);
   buttonCfg->configureAsConfigButton(&SuplaDevice);
 
   // SUPLA web configuration
@@ -126,45 +191,25 @@ void setup() {
   new Supla::Html::CustomTextParameter(CFG_TAG_ROOM_NAME, "Room Name", 10);
   new Supla::Html::CustomParameter(CFG_TAG_RX_PIN, "UART RX Pin", DEFAULT_HAIER_UART_RX_PIN);
   new Supla::Html::CustomParameter(CFG_TAG_TX_PIN, "UART TX Pin", DEFAULT_HAIER_UART_TX_PIN);
+  new Supla::Html::CustomParameter(CFG_TAG_LED_PIN, "Status LED Pin", DEFAULT_STATUS_LED_PIN);
+  new Supla::Html::CustomParameter(CFG_TAG_BUTTON_PIN, "Config Button Pin", DEFAULT_BUTTON_CFG_PIN);
   
   // Interface Level dropdown
-  auto interfaceLevel = new Supla::Html::SelectInputParameter(CFG_TAG_INTERFACE_LEVEL, "Interface Level");
+  auto interfaceLevel = new Supla::Html::SelectInputParameter(
+      CFG_TAG_INTERFACE_LEVEL,
+      "Interface Level (changing this requires removing and re-adding the device in Supla Cloud)");
   interfaceLevel->registerValue("Minimal", 0);
-  interfaceLevel->registerValue("Application", 1);
+  interfaceLevel->registerValue("Standard", 1);
   interfaceLevel->registerValue("Debug", 2);
   
   SuplaDevice.setInitialMode(Supla::InitialMode::StartInCfgMode);
   SuplaDevice.begin();
-  
-  // Load custom configuration values
-  //Supla::Storage::Init(); 
-  auto cfg = Supla::Storage::ConfigInstance();
-  char roomName[11] = {};
-  if (cfg && cfg->getString(CFG_TAG_ROOM_NAME, roomName, sizeof(roomName))) {
-    SUPLA_LOG_DEBUG("Loaded room name: %s", roomName);
-  } else {
-    strncpy(roomName, AC_ROOM, sizeof(roomName) - 1);
-  }
-
-  int32_t rxPin = DEFAULT_HAIER_UART_RX_PIN;
-  int32_t txPin = DEFAULT_HAIER_UART_TX_PIN;
-  if (cfg) {
-    cfg->getInt32(CFG_TAG_RX_PIN, &rxPin);
-    cfg->getInt32(CFG_TAG_TX_PIN, &txPin);
-  }
-  haierUartRxPin = static_cast<uint8_t>(rxPin);
-  haierUartTxPin = static_cast<uint8_t>(txPin);
-
-  int32_t interfaceLvl = 2; // Default to Application
-  if (cfg) {
-    cfg->getInt32(CFG_TAG_INTERFACE_LEVEL, &interfaceLvl);
-  }
 
   SUPLA_LOG_DEBUG("Configured interface level: %d", interfaceLvl);
-
+  SUPLA_LOG_DEBUG("Configured status LED pin: %d", statusLedPin);
+  SUPLA_LOG_DEBUG("Configured config button pin: %d", buttonCfgPin);
   SUPLA_LOG_DEBUG("UART RX Pin: %d", haierUartRxPin);
   SUPLA_LOG_DEBUG("UART TX Pin: %d", haierUartTxPin);
-  SUPLA_LOG_DEBUG("Interface Level: %d", interfaceLvl);
 
   // Init Haier controller with configured pins
   // Note: The controller was already constructed with default pins
@@ -186,6 +231,9 @@ void setup() {
   snprintf(caption, sizeof(caption), "%s-ON/OFF", roomName);
   haierPower->setInitialCaption(caption);
 
+  if (interfaceLvl >= 1) {
+    SUPLA_LOG_DEBUG("Creating Level 1 (Standard) channels...");
+
     haierCoolRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::ConditioningMode>(
       std::bind(&HaierSmartair2Controller::setACMode, &haierController, std::placeholders::_1),
       std::bind(&HaierSmartair2Controller::getACMode, &haierController),
@@ -204,10 +252,10 @@ void setup() {
     snprintf(caption, sizeof(caption), "%s-Mode:Heat", roomName);
     haierHeatRelay->setInitialCaption(caption);
 
-          // SUPLA channel: room temperature from Haier (SmartAir2 STATUS packet)
-      haierTemperature = new Supla::Sensor::VirtualThermometer;
-      snprintf(caption, sizeof(caption), "%s-Room Temp", roomName);
-      haierTemperature->setInitialCaption(caption);
+      // SUPLA channel: combined room temperature and humidity from Haier
+      haierTemperatureHumidity = new Supla::Sensor::VirtualThermHygroMeter;
+      snprintf(caption, sizeof(caption), "%s-Temp&Humi", roomName);
+      haierTemperatureHumidity->setInitialCaption(caption);
 
       // SUPLA channel: target temperature from Haier AC
       haierSetTemperature = new Supla::Sensor::VirtualThermometer;
@@ -222,7 +270,6 @@ void setup() {
       haierTempIncrease->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
       snprintf(caption, sizeof(caption), " -1°C < %s Set Temp > +1°C", roomName);
       haierTempIncrease->setInitialCaption(caption);
-
 
     haierFanHighRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::FanMode>(
       std::bind(&HaierSmartair2Controller::setFanMode, &haierController, std::placeholders::_1),
@@ -260,15 +307,15 @@ void setup() {
     snprintf(caption, sizeof(caption), "%s-Fan:Auto", roomName);
     haierFanAutoRelay->setInitialCaption(caption);
 
-
-  // Level 1 (Application): Add HVAC channel for temperature control
- 
-  if (interfaceLvl >= 1) {
- /*
-    haierHvacChannel = new Supla::Control::HaierAcHvacChannel(&haierController);
-    snprintf(caption, sizeof(caption), "%s-AC Control", roomName);
-    haierHvacChannel->setInitialCaption(caption);
- */
+    // Level 1 (Standard): HVAC channel is intentionally left disabled for now.
+    // HVAC channel temporarily disabled for troubleshooting.
+    // haierHvacChannel = new Supla::Control::HaierAcHvacChannel(&haierController);
+    // if (haierTemperatureHumidity != nullptr) {
+    //   haierHvacChannel->setMainThermometerChannelNo(
+    //       haierTemperatureHumidity->getChannelNumber());
+    // }
+    // snprintf(caption, sizeof(caption), "%s-AC Control", roomName);
+    // haierHvacChannel->setInitialCaption(caption);
     
     haierDryRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::ConditioningMode>(
       std::bind(&HaierSmartair2Controller::setACMode, &haierController, std::placeholders::_1),
@@ -513,11 +560,18 @@ void loop() {
     haierController.getPower() ? haierPowerState->set() : haierPowerState->clear();
   }
   
-  if (haierTemperature != nullptr) {
-    haierTemperature->setValue(haierController.getRoomTemperatureC());
+  if (haierTemperatureHumidity != nullptr) {
+    float roomTemp = haierController.getRoomTemperatureC();
+    if (isfinite(roomTemp)) {
+      haierTemperatureHumidity->setTemp(roomTemp);
+    }
+    haierTemperatureHumidity->setHumi(haierController.getRoomHumidity());
   }
   if (haierSetTemperature != nullptr) {
-    haierSetTemperature->setValue(haierController.getTargetTemperatureC());
+    float targetTemp = haierController.getTargetTemperatureC();
+    if (isfinite(targetTemp)) {
+      haierSetTemperature->setValue(targetTemp);
+    }
   }
 
   if (haierModeCool != nullptr) {
