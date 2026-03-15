@@ -10,6 +10,7 @@
 #include "smartair2_packet.h"
 #include <array>
 #include <cmath>
+#include <functional>
 #include <vector>
 #include <string>
 
@@ -58,6 +59,7 @@ class HaierSmartair2Controller {
     void setLockRemote(bool on);
     void setHealthMode(bool on);
     void setTenDegree(bool on);
+    void setTargetTemperatureChangedCallback(std::function<void(float)> callback);
 
 
     // Build CONTROL message from last STATUS snapshot and current setters
@@ -128,6 +130,7 @@ class HaierSmartair2Controller {
 
     // Queue a control update using the current cached state.
     void queueControlUpdate_();
+    void notifyTargetTemperatureChanged_();
 
     // Pending settings (setters write here, applied when sending control)
     struct PendingHvacSettings {
@@ -150,6 +153,7 @@ class HaierSmartair2Controller {
     } pending_settings_;
 
     bool control_send_requested_ = false;
+    std::function<void(float)> target_temperature_changed_callback_;
 
     // Send CONTROL now built from last status + pending settings
     void sendControlNow();

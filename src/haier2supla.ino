@@ -30,7 +30,6 @@
 #include "HaierSerialStream.h"
 #include "HaierSmartair2Controller.h"
 #include "HaierAcVirtualRelay.h"
-// #include "HaierAcHvacChannel.h"
 #include "smartair2_packet.h"
 
 // SUPLA components
@@ -89,7 +88,6 @@ Supla::Control::HaierVirtualRelay *haierSwingVerticalRelay = nullptr;
 Supla::Control::HaierVirtualRelay *haierHealthRelay = nullptr;
 Supla::Control::HaierVirtualRelay *haierDisplayRelay = nullptr;
 Supla::Control::HaierVirtualRelay *haierQuietRelay = nullptr;
-// Supla::Control::HaierAcHvacChannel *haierHvacChannel = nullptr;
 Supla::Sensor::VirtualBinary *haierPowerState = nullptr;
 Supla::Sensor::VirtualThermHygroMeter *haierTemperatureHumidity = nullptr;
 Supla::Control::HaierVirtualRelay *haierTempIncrease = nullptr;
@@ -114,6 +112,12 @@ Supla::Sensor::VirtualBinary *haierUseSwingBits = nullptr;
 Supla::Sensor::VirtualBinary *haierHorizontalSwing = nullptr;
 Supla::Sensor::VirtualBinary *haierVerticalSwing = nullptr;
 // Supla::Sensor::GeneralPurposeMeasurement *haierModeString = nullptr; 
+
+static void onHaierTargetTemperatureChanged(float targetTemp) {
+  if (haierSetTemperature != nullptr && isfinite(targetTemp)) {
+    haierSetTemperature->setValue(targetTemp);
+  }
+}
 
 static void buildMacSuffix(char *suffix, size_t suffixSize) {
   const unsigned long long mac = static_cast<unsigned long long>(ESP.getEfuseMac());
@@ -215,6 +219,7 @@ void setup() {
   // Note: The controller was already constructed with default pins
   // For proper reconfiguration, you may need to reinitialize the serial
   HaierSerial.begin(HAIER_UART_BAUD, SERIAL_8N1, haierUartRxPin, haierUartTxPin);
+  haierController.setTargetTemperatureChangedCallback(onHaierTargetTemperatureChanged);
   haierController.begin();
 
   // Build channel captions using configured room name
@@ -307,16 +312,6 @@ void setup() {
     snprintf(caption, sizeof(caption), "%s-Fan:Auto", roomName);
     haierFanAutoRelay->setInitialCaption(caption);
 
-    // Level 1 (Standard): HVAC channel is intentionally left disabled for now.
-    // HVAC channel temporarily disabled for troubleshooting.
-    // haierHvacChannel = new Supla::Control::HaierAcHvacChannel(&haierController);
-    // if (haierTemperatureHumidity != nullptr) {
-    //   haierHvacChannel->setMainThermometerChannelNo(
-    //       haierTemperatureHumidity->getChannelNumber());
-    // }
-    // snprintf(caption, sizeof(caption), "%s-AC Control", roomName);
-    // haierHvacChannel->setInitialCaption(caption);
-    
     haierDryRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::ConditioningMode>(
       std::bind(&HaierSmartair2Controller::setACMode, &haierController, std::placeholders::_1),
       std::bind(&HaierSmartair2Controller::getACMode, &haierController),

@@ -88,6 +88,11 @@ float HaierSmartair2Controller::getRoomTemperatureC() const {
   return room_temperature_c_;
 }
 
+void HaierSmartair2Controller::setTargetTemperatureChangedCallback(
+    std::function<void(float)> callback) {
+  target_temperature_changed_callback_ = std::move(callback);
+}
+
 HandlerError HaierSmartair2Controller::handleStatusAnswer_(
     FrameType request_type,
     FrameType message_type,
@@ -116,6 +121,7 @@ HandlerError HaierSmartair2Controller::handleStatusAnswer_(
   room_humidity_ = status.control.room_humidity;
   // Only update reported control fields if there is no pending user change.
   if (!pending_settings_.valid) {
+    const float previous_set_point = set_point_;
     ac_mode_ = static_cast<ConditioningMode>(status.control.ac_mode);
     set_point_ = decodeSetPointC(status.control.set_point);
     fan_mode_ = static_cast<FanMode>(status.control.fan_mode);
@@ -129,6 +135,11 @@ HandlerError HaierSmartair2Controller::handleStatusAnswer_(
     lock_remote_ = (status.control.lock_remote != 0);
     health_mode_ = (status.control.health_mode != 0);
     ten_degree_ = (status.control.ten_degree != 0);
+    if ((std::isnan(previous_set_point) && std::isfinite(set_point_)) ||
+        (std::isfinite(previous_set_point) && std::isfinite(set_point_) &&
+         std::fabs(previous_set_point - set_point_) > 0.25f)) {
+      notifyTargetTemperatureChanged_();
+    }
   }
   // Save last status control block for building control messages
   static_assert(sizeof(last_status_message_) == sizeof(status.control), "size mismatch");
@@ -175,6 +186,12 @@ void HaierSmartair2Controller::queueControlUpdate_() {
   control_send_requested_ = false;
 }
 
+void HaierSmartair2Controller::notifyTargetTemperatureChanged_() {
+  if (target_temperature_changed_callback_ && std::isfinite(set_point_)) {
+    target_temperature_changed_callback_(set_point_);
+  }
+}
+
 // Setters — update cached fields directly (no pending_settings_)
 void HaierSmartair2Controller::setTargetTemperatureC(float temp) {
   if (temp < kSetpointMinC) {
@@ -184,7 +201,11 @@ void HaierSmartair2Controller::setTargetTemperatureC(float temp) {
   }
   // SmartAir2 setpoint has 1C resolution, keep internal cache aligned.
   temp = roundf(temp);
+  const bool changed = std::isnan(set_point_) || std::fabs(set_point_ - temp) > 0.25f;
   set_point_ = temp;
+  if (changed) {
+    notifyTargetTemperatureChanged_();
+  }
   queueControlUpdate_();
 }
 
@@ -205,6 +226,10 @@ void HaierSmartair2Controller::setACMode(Supla::haier::smartair2_protocol::Condi
   queueControlUpdate_();
 }
 void HaierSmartair2Controller::setFanMode(Supla::haier::smartair2_protocol::FanMode mode) {
+  if (ac_mode_ == Supla::haier::smartair2_protocol::ConditioningMode::FAN &&
+      mode == Supla::haier::smartair2_protocol::FanMode::FAN_AUTO) {
+    return;
+  }
   fan_mode_ = mode;
   queueControlUpdate_();
 }
