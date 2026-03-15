@@ -32,3 +32,13 @@ Project requries following libriaries to be installed:
 - Partition scheme: Huge APP (3MB No OTA, 1MB SPIFFS)
 ## release
 Compiled bin file for ESP32-C6 super mini board (LED GPIO15, BOOT button GPIO9)
+# Change log
+## v0.0.5
+- initial release
+- all main AC functions working
+## v0.2.0
+- change in UX by using HVAC channel. AC modes kept in separate switches.
+- option of timer and weekly programs
+- added humidity reading
+- option to change pins of LED and config button in web config
+- bug fix

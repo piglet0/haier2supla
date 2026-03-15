@@ -19,6 +19,17 @@
 - Z2S library https://github.com/lsroka76/Z2S_Library/tree/main
 Z2S is Zigbee to Supla gateway. It supports use of Zigbee Thermostats. It reads or writhes thermostat via Zigbee and synchronises it with Supla channel of HVAC type. So HVAC channel works as remote control not as a full AC logic. Cooling or heating automation logic is a default functionionality of HVAC supla channel.
 
+## information about use of HVAC channel as remote control from supla forum. Use it as instructions or inspiration
+1. Termostat oparty o klasę HvacBase. Innego u nas nie ma ;). Ogólnie trzeba zrobić sobie własną implementację klasy Supla::Control::OutputInterface, na której przechowujesz stan "czy grzeje" (czytany z radia) i ustawiasz metodę "isOutputControlledInternally" aby zwracała false.
+Potem trzeba pilnować tego co jest na głowicy i w odpowiedniej klasie HVAC i odpowiednio przesyłać dane (czyli zmiana nastawy na głowicy -> propagujemy na klasę hvac; zmiana na hvac -> propagujemy na głowicę).
+2. Ja to robiłem tak, że mam klasę do obsługi głowicy i ona ma membera HvacBase oraz trzymam w zmiennych ostanie znane nastawy z głowicy.
+Gdy głowica przyśle update, to zapisuję to do tych zmiennych oraz ustawiam na hvac, dzięki czemu dane lecą do Supli.
+W iterateAlways czytam sobie nastawy z hvac i jeśli są różne niż te w zmiennych, to wysyłam na głowicę.
+To tak w skrócie. Czasem trzeba przez chwilę ignorować wartości z głowicy, aby się jakieś pętle nie porobiły
+3. Wrzuciłem przed chwilą do biblioteki klasę RemoteOutputInterface.
+Ją ustaw jako output dla HVAC i na niej ustawiaj wartość odczytaną z głowicy (metodą setOutputValueFromRemote() ).
+W konstruktorze podaj true (dla on/off) lub false (dla 0-100%).
+
 ## Inspiration for the code. Use of the remote control of haier ac by another iot platform esphome instead of Supla
 - Haier-esphome implementation of HaierProtocol for EspHome https://github.com/paveldn/haier-esphome
 - Esphome as reference for Haier-esphome https://github.com/esphome/esphome

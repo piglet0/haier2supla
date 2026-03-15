@@ -1,227 +1,191 @@
-#ifndef HAIER_AC_HVAC_CHANNEL_H
-#define HAIER_AC_HVAC_CHANNEL_H
+#pragma once
 
+#include <Arduino.h>
 #include <supla/control/hvac_base.h>
-#include <supla/control/output_interface.h>
-#include <supla/log_wrapper.h>
-#include <cmath>
-#include <cstdint>
-#include <climits>
+#include <supla/control/remote_output_interface.h>
+
 #include "HaierSmartair2Controller.h"
 
-namespace Supla {
-namespace Control {
-
-class HaierHvacOutput : public OutputInterface {
+class HaierAcHvacChannel : public Supla::Control::HvacBase {
  public:
-  explicit HaierHvacOutput(HaierSmartair2Controller *controller)
-      : controller_(controller) {}
+	explicit HaierAcHvacChannel(HaierSmartair2Controller *controller)
+			: Supla::Control::HvacBase(&power_output_),
+				controller_(controller),
+				power_output_(true) {
+		channel.setDefaultFunction(SUPLA_CHANNELFNC_HVAC_THERMOSTAT);
+		setHeatingAndCoolingSupported(true);
+		setHeatCoolSupported(false);
+		setTemperatureRoomMin(1600);
+		setTemperatureRoomMax(3000);
+		setButtonTemperatureStep(100);
+		setOutputValueOnError(0);
+		setMinOnTimeS(0);
+		setMinOffTimeS(0);
+		setDefaultSubfunction(SUPLA_HVAC_SUBFUNCTION_HEAT);
+		setSubfunction(SUPLA_HVAC_SUBFUNCTION_HEAT);
+		setTemperatureSetpointHeat(2300);
+		setTemperatureSetpointCool(2300);
+		last_requested_setpoint_centi_ = 2300;
+		last_synced_setpoint_centi_ = 2300;
+	}
 
-  int getOutputValue() const override {
-    return outputValue_;
-  }
+	void onInit() override {
+		Supla::Control::HvacBase::onInit();
+		syncFromController();
+	}
 
-  void setOutputValue(int value) override {
-    // Keep HVAC output binary to avoid percentage artifacts like 1%.
-    outputValue_ = (value > 0) ? 100 : 0;
-  }
+	void iterateAlways() override {
+		Supla::Control::HvacBase::iterateAlways();
 
-  bool isOnOffOnly() const override {
-    return true;
-  }
+		if (controller_ == nullptr) {
+			updateChannelState();
+			return;
+		}
 
-  bool isControlledInternally() const override {
-    return false;
-  }
+		normalizeRequestedMode_();
 
-  // Compatibility with projects expecting this method name.
-  bool isOutputControlledInternally() const {
-    return false;
-  }
+		const bool desired_power = getMode() != SUPLA_HVAC_MODE_OFF;
+		if (desired_power != last_requested_power_) {
+			last_requested_power_ = desired_power;
+			if (controller_->getPower() != desired_power) {
+				controller_->setPower(desired_power);
+				pending_local_power_change_ = true;
+				pending_power_state_ = desired_power;
+				pending_power_change_started_ms_ = millis();
+			}
+		}
 
-  void syncFromDevice() {
-    if (controller_) {
-      outputValue_ = controller_->getPower() ? 100 : 0;
-    }
-  }
+		const int16_t desired_setpoint_centi = getDesiredSharedSetpointCenti_();
+		if (desired_setpoint_centi != INT16_MIN &&
+				desired_setpoint_centi != last_requested_setpoint_centi_) {
+			last_requested_setpoint_centi_ = desired_setpoint_centi;
+			controller_->setTargetTemperatureC(centiToCelsius_(desired_setpoint_centi));
+			pending_local_setpoint_change_ = true;
+			pending_setpoint_centi_ = desired_setpoint_centi;
+			pending_setpoint_change_started_ms_ = millis();
+		}
+
+		syncFromController();
+		updateChannelState();
+	}
+
+	void syncFromController() {
+		if (controller_ == nullptr || !controller_->hasStatus()) {
+			return;
+		}
+
+		const bool actual_power = controller_->getPower();
+		const int16_t actual_setpoint_centi =
+				celsiusToCenti_(controller_->getTargetTemperatureC());
+		const unsigned long now = millis();
+
+		if (pending_local_power_change_) {
+			if (actual_power == pending_power_state_) {
+				pending_local_power_change_ = false;
+			} else if (now - pending_power_change_started_ms_ <
+								 kLocalPowerSyncGuardMs) {
+				return;
+			} else {
+				pending_local_power_change_ = false;
+			}
+		}
+
+		power_output_.setOutputValueFromRemote(actual_power ? 1 : 0);
+
+		if (!actual_power && getMode() != SUPLA_HVAC_MODE_OFF) {
+			setTargetMode(SUPLA_HVAC_MODE_OFF, false);
+			last_requested_power_ = false;
+		} else if (actual_power && getMode() == SUPLA_HVAC_MODE_OFF) {
+			setTargetMode(kHvacActiveMode, false);
+			last_requested_power_ = true;
+		} else if (actual_power && getMode() != kHvacActiveMode) {
+			setTargetMode(kHvacActiveMode, false);
+		}
+
+		if (actual_setpoint_centi == INT16_MIN) {
+			return;
+		}
+
+		if (pending_local_setpoint_change_) {
+			if (abs(actual_setpoint_centi - pending_setpoint_centi_) <= 50) {
+				pending_local_setpoint_change_ = false;
+			} else if (now - pending_setpoint_change_started_ms_ <
+						 kLocalSetpointSyncGuardMs) {
+				return;
+			} else {
+				pending_local_setpoint_change_ = false;
+			}
+		}
+
+		syncSharedSetpointInHvac_(actual_setpoint_centi);
+		last_requested_setpoint_centi_ = actual_setpoint_centi;
+	}
 
  private:
-  HaierSmartair2Controller *controller_ = nullptr;
-  int outputValue_ = 0;
+	static constexpr unsigned long kLocalPowerSyncGuardMs = 3000;
+	static constexpr unsigned long kLocalSetpointSyncGuardMs = 3000;
+	static constexpr int kHvacActiveMode = SUPLA_HVAC_MODE_HEAT;
+
+	static int16_t celsiusToCenti_(float temperature_c) {
+		if (!isfinite(temperature_c)) {
+			return INT16_MIN;
+		}
+		return static_cast<int16_t>(lroundf(temperature_c * 100.0f));
+	}
+
+	static float centiToCelsius_(int16_t temperature_centi) {
+		return static_cast<float>(temperature_centi) / 100.0f;
+	}
+
+	int16_t getDesiredSharedSetpointCenti_() {
+		const int16_t heat_setpoint = getTemperatureSetpointHeat();
+		const int16_t cool_setpoint = getTemperatureSetpointCool();
+
+		if (heat_setpoint == INT16_MIN) {
+			return cool_setpoint;
+		}
+		if (cool_setpoint == INT16_MIN) {
+			return heat_setpoint;
+		}
+		if (heat_setpoint == cool_setpoint) {
+			return heat_setpoint;
+		}
+
+		if (last_synced_setpoint_centi_ == heat_setpoint) {
+			return cool_setpoint;
+		}
+		return heat_setpoint;
+	}
+
+	void syncSharedSetpointInHvac_(int16_t shared_setpoint_centi) {
+		if (shared_setpoint_centi == INT16_MIN) {
+			return;
+		}
+
+		if (getTemperatureSetpointHeat() != shared_setpoint_centi) {
+			setTemperatureSetpointHeat(shared_setpoint_centi);
+		}
+		if (getTemperatureSetpointCool() != shared_setpoint_centi) {
+			setTemperatureSetpointCool(shared_setpoint_centi);
+		}
+		last_synced_setpoint_centi_ = shared_setpoint_centi;
+	}
+
+	void normalizeRequestedMode_() {
+		if (getMode() != SUPLA_HVAC_MODE_OFF && getMode() != kHvacActiveMode) {
+			setTargetMode(kHvacActiveMode, false);
+		}
+	}
+
+	HaierSmartair2Controller *controller_ = nullptr;
+	Supla::Control::RemoteOutputInterface power_output_;
+	bool pending_local_power_change_ = false;
+	bool pending_local_setpoint_change_ = false;
+	bool pending_power_state_ = false;
+	bool last_requested_power_ = false;
+	int16_t pending_setpoint_centi_ = INT16_MIN;
+	int16_t last_requested_setpoint_centi_ = INT16_MIN;
+	int16_t last_synced_setpoint_centi_ = INT16_MIN;
+	unsigned long pending_power_change_started_ms_ = 0;
+	unsigned long pending_setpoint_change_started_ms_ = 0;
 };
-
-class HaierAcHvacChannel : public HvacBase {
- public:
-  explicit HaierAcHvacChannel(HaierSmartair2Controller *controller)
-      : HvacBase(&output_), output_(controller), haierCtrl(controller) {
-    getChannel()->setDefault(SUPLA_CHANNELFNC_HVAC_THERMOSTAT);
-    setDefaultTemperatureRoomMin(SUPLA_CHANNELFNC_HVAC_THERMOSTAT, 1600);
-    setDefaultTemperatureRoomMax(SUPLA_CHANNELFNC_HVAC_THERMOSTAT, 3000);
-    setButtonTemperatureStep(100);
-  }
-
-  void onInit() override {
-    HvacBase::onInit();
-
-    if (haierCtrl) {
-      float targetTempC = haierCtrl->getTargetTemperatureC();
-      int16_t currentTemp = 2200;
-      if (std::isfinite(targetTempC)) {
-        currentTemp = static_cast<int16_t>(lroundf(targetTempC * 100.0f));
-      }
-      if (currentTemp < 1600 || currentTemp > 3000) {
-        currentTemp = 2200;
-      }
-      setTemperatureSetpointHeat(currentTemp);
-      lastSetpoint = currentTemp;
-      output_.syncFromDevice();
-
-      // Wait for first valid AC status before syncing HVAC mode/setpoint.
-      initialSyncDone = false;
-      lastMode = getMode();
-    }
-  }
-
-  void iterateAlways() override {
-    HvacBase::iterateAlways();
-
-    if (!haierCtrl) {
-      return;
-    }
-
-    output_.syncFromDevice();
-
-    // Do not drive HVAC logic until first valid status is received.
-    if (!haierCtrl->hasStatus()) {
-      return;
-    }
-
-    if (!initialSyncDone) {
-      bool modeIsSupported = false;
-      int deviceMode = mapDeviceModeToHvac(&modeIsSupported);
-      if (modeIsSupported && deviceMode != SUPLA_HVAC_MODE_OFF) {
-        lastSupportedMode = deviceMode;
-      }
-      setTargetMode(deviceMode, false);
-      lastMode = deviceMode;
-
-      float acTargetTempC = haierCtrl->getTargetTemperatureC();
-      if (std::isfinite(acTargetTempC)) {
-        int16_t acTempIn01C =
-            static_cast<int16_t>(lroundf(acTargetTempC * 100.0f));
-        if (acTempIn01C >= 1600 && acTempIn01C <= 3000) {
-          setTemperatureSetpointHeat(acTempIn01C);
-          lastSetpoint = acTempIn01C;
-        }
-      }
-
-      initialSyncDone = true;
-      return;
-    }
-
-    bool modeIsSupported = false;
-    int deviceMode = mapDeviceModeToHvac(&modeIsSupported);
-    if (modeIsSupported && deviceMode != SUPLA_HVAC_MODE_OFF) {
-      lastSupportedMode = deviceMode;
-    }
-
-    // Head-side changes (radio/status packet) -> HVAC class.
-    if (deviceMode != getMode()) {
-      setTargetMode(deviceMode, false);
-      lastMode = deviceMode;
-    }
-
-    int mode = getMode();
-    if (mode != lastMode) {
-      switch (mode) {
-        case SUPLA_HVAC_MODE_OFF:
-          haierCtrl->setPower(false);
-          break;
-        case SUPLA_HVAC_MODE_COOL:
-          haierCtrl->setPower(true);
-          haierCtrl->setACMode(
-              Supla::haier::smartair2_protocol::ConditioningMode::COOL);
-          lastSupportedMode = SUPLA_HVAC_MODE_COOL;
-          break;
-        case SUPLA_HVAC_MODE_HEAT:
-          haierCtrl->setPower(true);
-          haierCtrl->setACMode(
-              Supla::haier::smartair2_protocol::ConditioningMode::HEAT);
-          lastSupportedMode = SUPLA_HVAC_MODE_HEAT;
-          break;
-      }
-      lastMode = mode;
-    }
-
-    int16_t setpointHeat = getTemperatureSetpointHeat();
-    if (setpointHeat != INT16_MIN && setpointHeat != lastSetpoint) {
-      if (setpointHeat < 1600) {
-        setpointHeat = 1600;
-      }
-      if (setpointHeat > 3000) {
-        setpointHeat = 3000;
-      }
-
-      // Haier supports integer setpoint in C; HVAC keeps 0.01C scale.
-      setpointHeat = static_cast<int16_t>(((setpointHeat + 50) / 100) * 100);
-
-      float targetTemp = static_cast<float>(setpointHeat) / 100.0f;
-      SUPLA_LOG_DEBUG("HVAC setpoint changed to %.2fC", targetTemp);
-      haierCtrl->setTargetTemperatureC(targetTemp);
-      lastSetpoint = setpointHeat;
-    }
-
-    float acTargetTempC = haierCtrl->getTargetTemperatureC();
-    if (std::isfinite(acTargetTempC)) {
-      int16_t acTempIn01C =
-          static_cast<int16_t>(lroundf(acTargetTempC * 100.0f));
-      if (acTempIn01C >= 1600 && acTempIn01C <= 3000 &&
-          acTempIn01C != getTemperatureSetpointHeat()) {
-        setTemperatureSetpointHeat(acTempIn01C);
-        lastSetpoint = acTempIn01C;
-      }
-    }
-  }
-
- private:
-  int mapDeviceModeToHvac(bool *isSupportedMode) const {
-    if (!haierCtrl || !haierCtrl->getPower()) {
-      if (isSupportedMode) {
-        *isSupportedMode = true;
-      }
-      return SUPLA_HVAC_MODE_OFF;
-    }
-
-    if (haierCtrl->getModeCool()) {
-      if (isSupportedMode) {
-        *isSupportedMode = true;
-      }
-      return SUPLA_HVAC_MODE_COOL;
-    }
-
-    if (haierCtrl->getModeHeat()) {
-      if (isSupportedMode) {
-        *isSupportedMode = true;
-      }
-      return SUPLA_HVAC_MODE_HEAT;
-    }
-
-    // DRY/AUTO/FAN -> keep last supported HVAC mode (variant B).
-    if (isSupportedMode) {
-      *isSupportedMode = false;
-    }
-    return lastSupportedMode;
-  }
-
-  HaierHvacOutput output_;
-  HaierSmartair2Controller *haierCtrl = nullptr;
-  int16_t lastSetpoint = INT16_MIN;
-  int16_t lastMode = INT16_MIN;
-  int16_t lastSupportedMode = SUPLA_HVAC_MODE_HEAT;
-  bool initialSyncDone = false;
-};
-
-}  // namespace Control
-}  // namespace Supla
-
-#endif  // HAIER_AC_HVAC_CHANNEL_H

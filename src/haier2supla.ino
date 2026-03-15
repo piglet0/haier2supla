@@ -28,6 +28,7 @@
 #include <supla/sensor/virtual_therm_hygro_meter.h>
 #include <supla/sensor/virtual_binary.h>
 #include "HaierSerialStream.h"
+#include "HaierAcHvacChannel.h"
 #include "HaierSmartair2Controller.h"
 #include "HaierAcVirtualRelay.h"
 #include "smartair2_packet.h"
@@ -57,6 +58,7 @@ constexpr uint8_t DEFAULT_STATUS_LED_PIN = 15;
 constexpr uint8_t DEFAULT_BUTTON_CFG_PIN = 9;
 constexpr uint8_t DEFAULT_HAIER_UART_RX_PIN = 14;
 constexpr uint8_t DEFAULT_HAIER_UART_TX_PIN = 20;
+constexpr int32_t DEFAULT_INTERFACE_LEVEL = 1;
 constexpr uint32_t HAIER_UART_BAUD  = 9600;
 
 // Global variables for configurable pins (will be initialized from config)
@@ -73,7 +75,7 @@ HaierSmartair2Controller haierController(
   false   // use_crc = false - CRC is not used by SmartAir2, and enabling it would require changes in the protocol handler to not expect CRC bytes
 );
 
-Supla::Control::HaierVirtualRelay *haierPower = nullptr;
+// Supla::Control::HaierVirtualRelay *haierPower = nullptr;
 Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::ConditioningMode> *haierCoolRelay = nullptr;
 Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::ConditioningMode> *haierHeatRelay = nullptr;
 Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::ConditioningMode> *haierDryRelay = nullptr;
@@ -88,6 +90,7 @@ Supla::Control::HaierVirtualRelay *haierSwingVerticalRelay = nullptr;
 Supla::Control::HaierVirtualRelay *haierHealthRelay = nullptr;
 Supla::Control::HaierVirtualRelay *haierDisplayRelay = nullptr;
 Supla::Control::HaierVirtualRelay *haierQuietRelay = nullptr;
+HaierAcHvacChannel *haierHvac = nullptr;
 Supla::Sensor::VirtualBinary *haierPowerState = nullptr;
 Supla::Sensor::VirtualThermHygroMeter *haierTemperatureHumidity = nullptr;
 Supla::Control::HaierVirtualRelay *haierTempIncrease = nullptr;
@@ -136,15 +139,15 @@ static bool isLegacyAutoDeviceName(const char *deviceName) {
 
 void setup() {
   Serial.begin(115200);
-  delay(100);
+  delay(2000); // Wait for serial to initialize
 
   Supla::Storage::Init();
   auto cfg = Supla::Storage::ConfigInstance();
 
   char roomName[11] = {};
-  if (cfg && cfg->getString(CFG_TAG_ROOM_NAME, roomName, sizeof(roomName))) {
-    SUPLA_LOG_DEBUG("Loaded room name: %s", roomName);
-  } else {
+  const bool hasStoredRoomName =
+      cfg && cfg->getString(CFG_TAG_ROOM_NAME, roomName, sizeof(roomName));
+  if (!hasStoredRoomName) {
     strncpy(roomName, AC_ROOM, sizeof(roomName) - 1);
   }
 
@@ -152,13 +155,24 @@ void setup() {
   int32_t txPin = DEFAULT_HAIER_UART_TX_PIN;
   int32_t ledPin = DEFAULT_STATUS_LED_PIN;
   int32_t cfgPin = DEFAULT_BUTTON_CFG_PIN;
-  int32_t interfaceLvl = 1;
+  int32_t interfaceLvl = DEFAULT_INTERFACE_LEVEL;
+  bool hasStoredRxPin = false;
+  bool hasStoredTxPin = false;
+  bool hasStoredLedPin = false;
+  bool hasStoredCfgPin = false;
+  bool hasStoredInterfaceLvl = false;
   if (cfg) {
-    cfg->getInt32(CFG_TAG_RX_PIN, &rxPin);
-    cfg->getInt32(CFG_TAG_TX_PIN, &txPin);
-    cfg->getInt32(CFG_TAG_LED_PIN, &ledPin);
-    cfg->getInt32(CFG_TAG_BUTTON_PIN, &cfgPin);
-    cfg->getInt32(CFG_TAG_INTERFACE_LEVEL, &interfaceLvl);
+    hasStoredRxPin = cfg->getInt32(CFG_TAG_RX_PIN, &rxPin);
+    hasStoredTxPin = cfg->getInt32(CFG_TAG_TX_PIN, &txPin);
+    hasStoredLedPin = cfg->getInt32(CFG_TAG_LED_PIN, &ledPin);
+    hasStoredCfgPin = cfg->getInt32(CFG_TAG_BUTTON_PIN, &cfgPin);
+    hasStoredInterfaceLvl = cfg->getInt32(CFG_TAG_INTERFACE_LEVEL, &interfaceLvl);
+    if (!hasStoredInterfaceLvl) {
+      interfaceLvl = DEFAULT_INTERFACE_LEVEL;
+      cfg->setInt32(CFG_TAG_INTERFACE_LEVEL, interfaceLvl);
+      cfg->commit();
+      hasStoredInterfaceLvl = true;
+    }
   }
 
   statusLedPin = static_cast<uint8_t>(ledPin);
@@ -175,6 +189,26 @@ void setup() {
       cfg->commit();
     }
   }
+
+  SUPLA_LOG_DEBUG(
+      "Startup config: storage=%s room_name=%s (%s) device_name=%s (%s) "
+      "interface_level=%d (%s) status_led_pin=%d (%s) cfg_button_pin=%d (%s) "
+      "uart_rx_pin=%d (%s) uart_tx_pin=%d (%s)",
+      cfg ? "ready" : "missing",
+      roomName,
+      hasStoredRoomName ? "stored" : "default",
+      deviceName,
+      hasStoredDeviceName ? "stored" : "generated",
+      interfaceLvl,
+      hasStoredInterfaceLvl ? "stored" : "default",
+      statusLedPin,
+      hasStoredLedPin ? "stored" : "default",
+      buttonCfgPin,
+      hasStoredCfgPin ? "stored" : "default",
+      haierUartRxPin,
+      hasStoredRxPin ? "stored" : "default",
+      haierUartTxPin,
+      hasStoredTxPin ? "stored" : "default");
 
   SuplaDevice.setName(deviceName);
   SuplaDevice.setCustomHostnamePrefix("SUPLA2HAIER");
@@ -202,18 +236,12 @@ void setup() {
   auto interfaceLevel = new Supla::Html::SelectInputParameter(
       CFG_TAG_INTERFACE_LEVEL,
       "Interface Level (changing this requires removing and re-adding the device in Supla Cloud)");
-  interfaceLevel->registerValue("Minimal", 0);
-  interfaceLevel->registerValue("Standard", 1);
-  interfaceLevel->registerValue("Debug", 2);
-  
+  interfaceLevel->registerValue("Minimal", 1);
+  interfaceLevel->registerValue("Standard", 2);
+  interfaceLevel->registerValue("Debug", 3);
+
   SuplaDevice.setInitialMode(Supla::InitialMode::StartInCfgMode);
   SuplaDevice.begin();
-
-  SUPLA_LOG_DEBUG("Configured interface level: %d", interfaceLvl);
-  SUPLA_LOG_DEBUG("Configured status LED pin: %d", statusLedPin);
-  SUPLA_LOG_DEBUG("Configured config button pin: %d", buttonCfgPin);
-  SUPLA_LOG_DEBUG("UART RX Pin: %d", haierUartRxPin);
-  SUPLA_LOG_DEBUG("UART TX Pin: %d", haierUartTxPin);
 
   // Init Haier controller with configured pins
   // Note: The controller was already constructed with default pins
@@ -226,20 +254,35 @@ void setup() {
   char caption[100];
 
   // Create channels based on interface level (cumulative)
-  // Level 0 (Minimal): Power on/off only
-  haierPower = new Supla::Control::HaierVirtualRelay(
-    std::bind(&HaierSmartair2Controller::setPower, &haierController, std::placeholders::_1),
-    std::bind(&HaierSmartair2Controller::getPower, &haierController)
-  );
-  haierPower->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
-  haierPower->setDefaultStateRestore();
-  snprintf(caption, sizeof(caption), "%s-ON/OFF", roomName);
-  haierPower->setInitialCaption(caption);
+  // Level 1 (Minimal): basic functions only
+  SUPLA_LOG_DEBUG("Creating Level 1 (Minimal) channels...");
 
-  if (interfaceLvl >= 1) {
-    SUPLA_LOG_DEBUG("Creating Level 1 (Standard) channels...");
+  // haierPower channel: turn AC on/off - this is now handled by the HVAC channel, so we won't create a separate power channel to avoid confusion. The HVAC channel will control power state based on the selected mode (e.g., COOL, HEAT, AUTO, etc).
+  /* haierPower = new Supla::Control::HaierVirtualRelay(
+        std::bind(&HaierSmartair2Controller::setPower, &haierController, std::placeholders::_1),
+        std::bind(&HaierSmartair2Controller::getPower, &haierController)
+      );
+      haierPower->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
+      haierPower->setDefaultStateRestore();
+      snprintf(caption, sizeof(caption), "%s-ON/OFF", roomName);
+      haierPower->setInitialCaption(caption);
+    */
 
-    haierCoolRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::ConditioningMode>(
+    // haierHvac channel: combined HVAC control channel that will manage power and setpoint. Mode and Fun mode is set by other relays
+    haierHvac = new HaierAcHvacChannel(&haierController);
+    snprintf(caption, sizeof(caption), "%s-Temp Setting", roomName);
+    haierHvac->setInitialCaption(caption);
+    // SUPLA channel: combined room temperature and humidity from Haier
+    // Created at level 0 so HVAC thermostat always has a temperature source
+    haierTemperatureHumidity = new Supla::Sensor::VirtualThermHygroMeter;
+    snprintf(caption, sizeof(caption), "%s-Temp&Humi", roomName);
+    haierTemperatureHumidity->setInitialCaption(caption);
+    if (haierHvac != nullptr && haierTemperatureHumidity->getChannel() != nullptr) {
+      haierHvac->setMainThermometerChannelNo(
+          haierTemperatureHumidity->getChannel()->getChannelNumber());
+    }
+    // AC mode Cool channel
+      haierCoolRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::ConditioningMode>(
       std::bind(&HaierSmartair2Controller::setACMode, &haierController, std::placeholders::_1),
       std::bind(&HaierSmartair2Controller::getACMode, &haierController),
       Supla::haier::smartair2_protocol::ConditioningMode::COOL
@@ -247,7 +290,7 @@ void setup() {
     haierCoolRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
     snprintf(caption, sizeof(caption), "%s-Mode:Cool", roomName);
     haierCoolRelay->setInitialCaption(caption);
-
+    // AC mode Heat channel
     haierHeatRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::ConditioningMode>(
       std::bind(&HaierSmartair2Controller::setACMode, &haierController, std::placeholders::_1),
       std::bind(&HaierSmartair2Controller::getACMode, &haierController),
@@ -256,80 +299,7 @@ void setup() {
     haierHeatRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
     snprintf(caption, sizeof(caption), "%s-Mode:Heat", roomName);
     haierHeatRelay->setInitialCaption(caption);
-
-      // SUPLA channel: combined room temperature and humidity from Haier
-      haierTemperatureHumidity = new Supla::Sensor::VirtualThermHygroMeter;
-      snprintf(caption, sizeof(caption), "%s-Temp&Humi", roomName);
-      haierTemperatureHumidity->setInitialCaption(caption);
-
-      // SUPLA channel: target temperature from Haier AC
-      haierSetTemperature = new Supla::Sensor::VirtualThermometer;
-      snprintf(caption, sizeof(caption), "%s-Set Temp", roomName);
-      haierSetTemperature->setInitialCaption(caption);  
-
-      // SUPLA channel: virtual relay to increase/decrease temperature
-      haierTempIncrease = new Supla::Control::HaierVirtualRelay(
-        std::bind(&HaierSmartair2Controller::increaseTargetTemperatureC, &haierController, std::placeholders::_1),
-        []() { return false; }
-      );
-      haierTempIncrease->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
-      snprintf(caption, sizeof(caption), " -1°C < %s Set Temp > +1°C", roomName);
-      haierTempIncrease->setInitialCaption(caption);
-
-    haierFanHighRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::FanMode>(
-      std::bind(&HaierSmartair2Controller::setFanMode, &haierController, std::placeholders::_1),
-      std::bind(&HaierSmartair2Controller::getFanMode, &haierController),
-      Supla::haier::smartair2_protocol::FanMode::FAN_HIGH
-    );
-    haierFanHighRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
-    snprintf(caption, sizeof(caption), "%s-Fan:High", roomName);
-    haierFanHighRelay->setInitialCaption(caption);
-    
-    haierFanMidRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::FanMode>(
-      std::bind(&HaierSmartair2Controller::setFanMode, &haierController, std::placeholders::_1),
-      std::bind(&HaierSmartair2Controller::getFanMode, &haierController),
-      Supla::haier::smartair2_protocol::FanMode::FAN_MID
-    );
-    haierFanMidRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
-    snprintf(caption, sizeof(caption), "%s-Fan:Mid", roomName);
-    haierFanMidRelay->setInitialCaption(caption);
-    
-    haierFanLowRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::FanMode>(
-      std::bind(&HaierSmartair2Controller::setFanMode, &haierController, std::placeholders::_1),
-      std::bind(&HaierSmartair2Controller::getFanMode, &haierController),
-      Supla::haier::smartair2_protocol::FanMode::FAN_LOW
-    );
-    haierFanLowRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
-    snprintf(caption, sizeof(caption), "%s-Fan:Low", roomName);
-    haierFanLowRelay->setInitialCaption(caption);
-    
-    haierFanAutoRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::FanMode>(
-      std::bind(&HaierSmartair2Controller::setFanMode, &haierController, std::placeholders::_1),
-      std::bind(&HaierSmartair2Controller::getFanMode, &haierController),
-      Supla::haier::smartair2_protocol::FanMode::FAN_AUTO
-    );
-    haierFanAutoRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
-    snprintf(caption, sizeof(caption), "%s-Fan:Auto", roomName);
-    haierFanAutoRelay->setInitialCaption(caption);
-
-    haierDryRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::ConditioningMode>(
-      std::bind(&HaierSmartair2Controller::setACMode, &haierController, std::placeholders::_1),
-      std::bind(&HaierSmartair2Controller::getACMode, &haierController),
-      Supla::haier::smartair2_protocol::ConditioningMode::DRY
-    );
-    haierDryRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
-    snprintf(caption, sizeof(caption), "%s-Mode:Dry", roomName);
-    haierDryRelay->setInitialCaption(caption);
-    
-    haierFanRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::ConditioningMode>(
-      std::bind(&HaierSmartair2Controller::setACMode, &haierController, std::placeholders::_1),
-      std::bind(&HaierSmartair2Controller::getACMode, &haierController),
-      Supla::haier::smartair2_protocol::ConditioningMode::FAN
-    );
-    haierFanRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
-    snprintf(caption, sizeof(caption), "%s-Mode:Fan", roomName);
-    haierFanRelay->setInitialCaption(caption);
-    
+    // AC Auto mode channel
     haierAutoRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::ConditioningMode>(
       std::bind(&HaierSmartair2Controller::setACMode, &haierController, std::placeholders::_1),
       std::bind(&HaierSmartair2Controller::getACMode, &haierController),
@@ -338,6 +308,61 @@ void setup() {
     haierAutoRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
     snprintf(caption, sizeof(caption), "%s-Mode:Auto", roomName);
     haierAutoRelay->setInitialCaption(caption);
+    // AC Dry mode channel
+    haierDryRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::ConditioningMode>(
+      std::bind(&HaierSmartair2Controller::setACMode, &haierController, std::placeholders::_1),
+      std::bind(&HaierSmartair2Controller::getACMode, &haierController),
+      Supla::haier::smartair2_protocol::ConditioningMode::DRY
+    );
+    haierDryRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
+    snprintf(caption, sizeof(caption), "%s-Mode:Dry", roomName);
+    haierDryRelay->setInitialCaption(caption);
+    // AC Fan only mode channel
+    haierFanRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::ConditioningMode>(
+      std::bind(&HaierSmartair2Controller::setACMode, &haierController, std::placeholders::_1),
+      std::bind(&HaierSmartair2Controller::getACMode, &haierController),
+      Supla::haier::smartair2_protocol::ConditioningMode::FAN
+    );
+    haierFanRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
+    snprintf(caption, sizeof(caption), "%s-Mode:Fan", roomName);
+    haierFanRelay->setInitialCaption(caption);
+    // Fan Auto mode channel
+    haierFanAutoRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::FanMode>(
+      std::bind(&HaierSmartair2Controller::setFanMode, &haierController, std::placeholders::_1),
+      std::bind(&HaierSmartair2Controller::getFanMode, &haierController),
+      Supla::haier::smartair2_protocol::FanMode::FAN_AUTO
+    );
+    haierFanAutoRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
+    snprintf(caption, sizeof(caption), "%s-Fan:Auto", roomName);
+    haierFanAutoRelay->setInitialCaption(caption);
+    // Fan High channel
+    haierFanHighRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::FanMode>(
+      std::bind(&HaierSmartair2Controller::setFanMode, &haierController, std::placeholders::_1),
+      std::bind(&HaierSmartair2Controller::getFanMode, &haierController),
+      Supla::haier::smartair2_protocol::FanMode::FAN_HIGH
+    );
+    haierFanHighRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
+    snprintf(caption, sizeof(caption), "%s-Fan:High", roomName);
+    haierFanHighRelay->setInitialCaption(caption);
+    // Fan Mid mode channel
+    haierFanMidRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::FanMode>(
+      std::bind(&HaierSmartair2Controller::setFanMode, &haierController, std::placeholders::_1),
+      std::bind(&HaierSmartair2Controller::getFanMode, &haierController),
+      Supla::haier::smartair2_protocol::FanMode::FAN_MID
+    );
+    haierFanMidRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
+    snprintf(caption, sizeof(caption), "%s-Fan:Mid", roomName);
+    haierFanMidRelay->setInitialCaption(caption);
+    // Fan Low channel
+    haierFanLowRelay = new Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::FanMode>(
+      std::bind(&HaierSmartair2Controller::setFanMode, &haierController, std::placeholders::_1),
+      std::bind(&HaierSmartair2Controller::getFanMode, &haierController),
+      Supla::haier::smartair2_protocol::FanMode::FAN_LOW
+    );
+    haierFanLowRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
+    snprintf(caption, sizeof(caption), "%s-Fan:Low", roomName);
+    haierFanLowRelay->setInitialCaption(caption);
+    // Swing Horzontal channel
     haierSwingHorizontalRelay = new Supla::Control::HaierVirtualRelay(
       std::bind(&HaierSmartair2Controller::setHorizontalSwing, &haierController, std::placeholders::_1),
       std::bind(&HaierSmartair2Controller::getHorizontalSwing, &haierController)
@@ -345,7 +370,7 @@ void setup() {
     haierSwingHorizontalRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
     snprintf(caption, sizeof(caption), "%s-Horizontal Swing", roomName);
     haierSwingHorizontalRelay->setInitialCaption(caption);
-    
+    // Swing Vertical channel
     haierSwingVerticalRelay = new Supla::Control::HaierVirtualRelay(
       std::bind(&HaierSmartair2Controller::setVerticalSwing, &haierController, std::placeholders::_1),
       std::bind(&HaierSmartair2Controller::getVerticalSwing, &haierController)
@@ -353,24 +378,14 @@ void setup() {
     haierSwingVerticalRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
     snprintf(caption, sizeof(caption), "%s-Vertical Swing", roomName);
     haierSwingVerticalRelay->setInitialCaption(caption);
-    
-// TODO how to reverse action?    
-    haierDisplayRelay = new Supla::Control::HaierVirtualRelay(
-      std::bind(&HaierSmartair2Controller::setDisplayStatus, &haierController, std::placeholders::_1),
-      std::bind(&HaierSmartair2Controller::getDisplayStatus, &haierController)
-    );
-    haierDisplayRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
-    snprintf(caption, sizeof(caption), "%s-Disable Display", roomName);
-    haierDisplayRelay->setInitialCaption(caption);
-    
-    haierQuietRelay = new Supla::Control::HaierVirtualRelay(
-      std::bind(&HaierSmartair2Controller::setQuiet, &haierController, std::placeholders::_1),
-      std::bind(&HaierSmartair2Controller::getQuiet, &haierController)
-    );
-    haierQuietRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
-    snprintf(caption, sizeof(caption), "%s-Quiet Mode", roomName);
-    haierQuietRelay->setInitialCaption(caption);
-    
+
+
+// interface level 2 adds mode and fan controls, temperature setpoint control, and combined temperature/humidity sensor
+
+if (interfaceLvl >= 2) {
+    SUPLA_LOG_DEBUG("Creating Level 2 (Standard) channels...");
+
+    // Health mode channel   
     haierHealthRelay = new Supla::Control::HaierVirtualRelay(
         std::bind(&HaierSmartair2Controller::setHealthMode, &haierController, std::placeholders::_1),
         std::bind(&HaierSmartair2Controller::getHealthMode, &haierController)
@@ -378,22 +393,33 @@ void setup() {
       haierHealthRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
       snprintf(caption, sizeof(caption), "%s-Health Mode", roomName);
       haierHealthRelay->setInitialCaption(caption);
-
-    
+    // Quiet mode channel
+    haierQuietRelay = new Supla::Control::HaierVirtualRelay(
+      std::bind(&HaierSmartair2Controller::setQuiet, &haierController, std::placeholders::_1),
+      std::bind(&HaierSmartair2Controller::getQuiet, &haierController)
+    );
+    haierQuietRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
+    snprintf(caption, sizeof(caption), "%s-Quiet Mode", roomName);
+    haierQuietRelay->setInitialCaption(caption);
+    // Disable display channel    
+    haierDisplayRelay = new Supla::Control::HaierVirtualRelay(
+      std::bind(&HaierSmartair2Controller::setDisplayStatus, &haierController, std::placeholders::_1),
+      std::bind(&HaierSmartair2Controller::getDisplayStatus, &haierController)
+    );
+    haierDisplayRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
+    snprintf(caption, sizeof(caption), "%s-Disable Display", roomName);
+    haierDisplayRelay->setInitialCaption(caption);
   }
 
-  // Level 2 (Debug): Add all remaining channels
-  if (interfaceLvl >= 2) {
-    SUPLA_LOG_DEBUG("Creating Level 2 (Debug) channels...");
+  // Level 3 (Debug): Add all remaining channels
+  if (interfaceLvl >= 3) {
+    SUPLA_LOG_DEBUG("Creating Level 3 (Debug) channels...");
 
-       
       // Supla channel: binary sensor for Haier AC power state
       haierPowerState = new Supla::Sensor::VirtualBinary;
       haierPowerState->setDefaultFunction(SUPLA_CHANNELFNC_BINARY_SENSOR);
       snprintf(caption, sizeof(caption), "%s-Power", roomName);
       haierPowerState->setInitialCaption(caption);
-
-
       // SUPLA channel: binary sensor indicating AC is in COOL mode
       haierModeCool = new Supla::Sensor::VirtualBinary;
       haierModeCool->setDefaultFunction(SUPLA_CHANNELFNC_BINARY_SENSOR);
@@ -452,7 +478,7 @@ void setup() {
       // SUPLA channel: binary sensor indicating Display status
       haierDisplay = new Supla::Sensor::VirtualBinary;
       haierDisplay->setDefaultFunction(SUPLA_CHANNELFNC_BINARY_SENSOR);
-      snprintf(caption, sizeof(caption), "%s-Display", roomName);
+      snprintf(caption, sizeof(caption), "%s-Disable Display", roomName);
       haierDisplay->setInitialCaption(caption); // 0 -włączony
       // SUPLA channel: binary sensor indicating Lock Remote
       haierLockRemote = new Supla::Sensor::VirtualBinary;
@@ -489,22 +515,34 @@ void setup() {
       haierVerticalSwing->setDefaultFunction(SUPLA_CHANNELFNC_BINARY_SENSOR);
       snprintf(caption, sizeof(caption), "%s-Vertical Swing", roomName);
       haierVerticalSwing->setInitialCaption(caption);
-      
+      // SUPLA channel: target temperature from Haier AC
+      haierSetTemperature = new Supla::Sensor::VirtualThermometer;
+      snprintf(caption, sizeof(caption), "%s-Set Temp", roomName);
+      haierSetTemperature->setInitialCaption(caption);  
+      // SUPLA channel: virtual relay to increase/decrease temperature
+      haierTempIncrease = new Supla::Control::HaierVirtualRelay(
+        std::bind(&HaierSmartair2Controller::increaseTargetTemperatureC, &haierController, std::placeholders::_1),
+        []() { return false; }
+      );
+      haierTempIncrease->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
+      snprintf(caption, sizeof(caption), " -1°C < %s Set Temp > +1°C", roomName);
+      haierTempIncrease->setInitialCaption(caption);
   }
-
-  
 }
 
 void loop() {
-  SuplaDevice.iterate();
   haierController.loop();
+  SuplaDevice.iterate();
 
   // Update channels based on availability (nullptr check handles interface level)
-  
+
+
   // Minimal level: Power only
+  /*
   if (haierPower != nullptr) {
     haierPower->syncState();
   }
+  */
 
   // Application level: Power + Mode relays
   if (haierCoolRelay != nullptr) {
