@@ -147,6 +147,42 @@ class HaierVirtualRelay : public VirtualRelay {
   std::function<bool()> getter_;
 };
 
+class HaierActionVirtualRelay : public VirtualRelay {
+ public:
+  HaierActionVirtualRelay(std::function<void()> action,
+                          std::function<bool()> getter = nullptr,
+                          _supla_int_t functions =
+                              (0xFF ^ SUPLA_BIT_FUNC_CONTROLLINGTHEROLLERSHUTTER))
+      : VirtualRelay(functions), action_(std::move(action)), getter_(std::move(getter)) {}
+
+  void turnOn(_supla_int_t duration = 0) override {
+    VirtualRelay::turnOn(duration);
+    if (action_) action_();
+  }
+
+  void turnOff(_supla_int_t duration = 0) override {
+    VirtualRelay::turnOff(duration);
+  }
+
+  bool isOn() override {
+    if (getter_) return getter_();
+    return VirtualRelay::isOn();
+  }
+
+  void syncState() {
+    const bool on = isOn();
+    if (on && !VirtualRelay::isOn()) {
+      VirtualRelay::turnOn(0);
+    } else if (!on && VirtualRelay::isOn()) {
+      VirtualRelay::turnOff(0);
+    }
+  }
+
+ private:
+  std::function<void()> action_;
+  std::function<bool()> getter_;
+};
+
 
 }  // namespace Control
 }  // namespace Supla

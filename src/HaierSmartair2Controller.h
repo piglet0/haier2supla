@@ -16,6 +16,7 @@
 
 // Minimal SmartAir2 controller used by SUPLA integration (step A)
 // - sends periodic STATUS requests (0x4D01)
+// - sends periodic REPORT_NETWORK_STATUS frames (0xF7)
 // - parses STATUS answer and exposes room temperature
 // - provides simple power ON/OFF commands (0x4D02 / 0x4D03)
 class HaierSmartair2Controller {
@@ -59,6 +60,10 @@ class HaierSmartair2Controller {
     void setLockRemote(bool on);
     void setHealthMode(bool on);
     void setTenDegree(bool on);
+    void triggerPowerSavingModeToggleSequence();
+    bool isPowerSavingModeToggleSequenceActive() const;
+    void triggerDisplayTemperatureToggleSequence();
+    bool isDisplayTemperatureToggleSequenceActive() const;
     void setTargetTemperatureChangedCallback(std::function<void(float)> callback);
 
 
@@ -80,13 +85,22 @@ class HaierSmartair2Controller {
     bool getTenDegree() const;
 
  private:
+  void sendNetworkStatusReport_();
   void sendStatusRequest_();
+
+  haier_protocol::HandlerError handleNetworkStatusAnswer_(
+      haier_protocol::FrameType request_type,
+      haier_protocol::FrameType message_type,
+      const uint8_t *data,
+      size_t data_size);
 
   haier_protocol::HandlerError handleStatusAnswer_(
       haier_protocol::FrameType request_type,
       haier_protocol::FrameType message_type,
       const uint8_t *data,
       size_t data_size);
+
+  uint8_t getWifiSignalStrength_() const;
 
   HardwareSerial &serial_;
   uint8_t rx_pin_;
@@ -96,6 +110,7 @@ class HaierSmartair2Controller {
 
   HaierSerialStream stream_;
   haier_protocol::ProtocolHandler protocol_;
+    std::chrono::steady_clock::time_point last_network_status_report_;
   std::chrono::steady_clock::time_point last_status_request_;
 
   float room_temperature_c_ = NAN;
@@ -131,6 +146,10 @@ class HaierSmartair2Controller {
     // Queue a control update using the current cached state.
     void queueControlUpdate_();
     void notifyTargetTemperatureChanged_();
+    void processPowerSavingModeToggleSequence_();
+    void processDisplayTemperatureToggleSequence_();
+    void sendDisplayToggleStep_(bool on);
+    bool isAnyToggleSequenceActive_() const;
 
     // Pending settings (setters write here, applied when sending control)
     struct PendingHvacSettings {
@@ -155,8 +174,28 @@ class HaierSmartair2Controller {
     bool control_send_requested_ = false;
     std::function<void(float)> target_temperature_changed_callback_;
 
+    struct PowerSavingModeToggleSequence {
+        bool active = false;
+        bool auto_mode_sent = false;
+        bool next_health_mode = false;
+        uint8_t toggles_remaining = 0;
+        std::chrono::steady_clock::time_point next_step_at{};
+    } power_saving_mode_toggle_sequence_;
+
+    struct DisplayTemperatureToggleSequence {
+        bool active = false;
+        bool next_display_status = false;
+        uint8_t toggles_remaining = 0;
+        std::chrono::steady_clock::time_point next_step_at{};
+    } display_temperature_toggle_sequence_;
+
     // Send CONTROL now built from last status + pending settings
     void sendControlNow();
 
     std::chrono::milliseconds control_retry_interval_{500};
+    std::chrono::milliseconds network_status_report_interval_{5000};
+    std::chrono::milliseconds power_saving_toggle_interval_{300};
+    std::chrono::milliseconds power_saving_status_retry_interval_{250};
+    std::chrono::milliseconds display_temperature_toggle_interval_{300};
+    std::chrono::milliseconds display_temperature_status_retry_interval_{250};
 };

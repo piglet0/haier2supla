@@ -1,6 +1,6 @@
-\
 #define AC_ROOM "Haier"
-
+#define FW_VERSION "0.2.2"
+#define FW_BUILD_INFO __DATE__ " " __TIME__
 
 #include <Arduino.h>
 #include <cstring>
@@ -13,6 +13,7 @@
 #include <supla/network/html/protocol_parameters.h>
 #include <supla/network/html/status_led_parameters.h>
 #include <supla/network/html/wifi_parameters.h>
+#include <supla/network/html/button_update.h>
 #include <supla/network/html/custom_text_parameter.h>
 #include <supla/network/html/custom_parameter.h>
 #include <supla/network/html/select_input_parameter.h>
@@ -88,6 +89,8 @@ Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::Fan
 Supla::Control::HaierVirtualRelay *haierSwingHorizontalRelay = nullptr;
 Supla::Control::HaierVirtualRelay *haierSwingVerticalRelay = nullptr;
 Supla::Control::HaierVirtualRelay *haierHealthRelay = nullptr;
+Supla::Control::HaierActionVirtualRelay *haierPowerSavingRelay = nullptr;
+Supla::Control::HaierActionVirtualRelay *haierDisplayTemperatureRelay = nullptr;
 Supla::Control::HaierVirtualRelay *haierDisplayRelay = nullptr;
 Supla::Control::HaierVirtualRelay *haierQuietRelay = nullptr;
 HaierAcHvacChannel *haierHvac = nullptr;
@@ -131,6 +134,33 @@ static void buildDefaultDeviceName(char *deviceName, size_t deviceNameSize) {
   char macSuffix[13] = {};
   buildMacSuffix(macSuffix, sizeof(macSuffix));
   snprintf(deviceName, deviceNameSize, "Supla2Haier-%s", macSuffix);
+}
+
+static uint8_t parseBuildMonth(const char *buildDate) {
+  static const char *const months[] = {"Jan", "Feb", "Mar", "Apr",
+                                       "May", "Jun", "Jul", "Aug",
+                                       "Sep", "Oct", "Nov", "Dec"};
+
+  for (uint8_t index = 0; index < 12; ++index) {
+    if (strncmp(buildDate, months[index], 3) == 0) {
+      return index + 1;
+    }
+  }
+
+  return 0;
+}
+
+static void buildCompactSwVersion(char *swVersion, size_t swVersionSize) {
+  const char *buildDate = __DATE__;
+  const char *buildTime = __TIME__;
+  const uint8_t month = parseBuildMonth(buildDate);
+  const uint8_t day = static_cast<uint8_t>(atoi(buildDate + 4));
+  const uint8_t year = static_cast<uint8_t>(atoi(buildDate + 9));
+  const uint8_t hour = static_cast<uint8_t>(atoi(buildTime));
+  const uint8_t minute = static_cast<uint8_t>(atoi(buildTime + 3));
+
+  snprintf(swVersion, swVersionSize, "%s-%02u%02u%02u%02u%02u", FW_VERSION,
+           year, month, day, hour, minute);
 }
 
 static bool isLegacyAutoDeviceName(const char *deviceName) {
@@ -212,6 +242,12 @@ void setup() {
 
   SuplaDevice.setName(deviceName);
   SuplaDevice.setCustomHostnamePrefix("SUPLA2HAIER");
+  char swVersion[18] = {};
+  buildCompactSwVersion(swVersion, sizeof(swVersion));
+  SuplaDevice.setSwVersion(swVersion);
+
+  SUPLA_LOG_DEBUG("Firmware version: %s, build: %s", FW_VERSION,
+                  FW_BUILD_INFO);
 
   statusLed = new Supla::Device::StatusLed(statusLedPin, false);
 
@@ -224,6 +260,7 @@ void setup() {
   new Supla::Html::WifiParameters;
   new Supla::Html::ProtocolParameters;
   new Supla::Html::StatusLedParameters;
+  new Supla::Html::ButtonUpdate(&suplaServer);
   
   // Custom configuration parameters
   new Supla::Html::CustomTextParameter(CFG_TAG_ROOM_NAME, "Room Name", 10);
@@ -393,6 +430,20 @@ if (interfaceLvl >= 2) {
       haierHealthRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
       snprintf(caption, sizeof(caption), "%s-Health Mode", roomName);
       haierHealthRelay->setInitialCaption(caption);
+    haierPowerSavingRelay = new Supla::Control::HaierActionVirtualRelay(
+      std::bind(&HaierSmartair2Controller::triggerPowerSavingModeToggleSequence, &haierController),
+      std::bind(&HaierSmartair2Controller::isPowerSavingModeToggleSequenceActive, &haierController)
+    );
+    haierPowerSavingRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
+    snprintf(caption, sizeof(caption), "%s-Power Saving Toggle", roomName);
+    haierPowerSavingRelay->setInitialCaption(caption);
+    haierDisplayTemperatureRelay = new Supla::Control::HaierActionVirtualRelay(
+      std::bind(&HaierSmartair2Controller::triggerDisplayTemperatureToggleSequence, &haierController),
+      std::bind(&HaierSmartair2Controller::isDisplayTemperatureToggleSequenceActive, &haierController)
+    );
+    haierDisplayTemperatureRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
+    snprintf(caption, sizeof(caption), "%s-Display Temp Toggle", roomName);
+    haierDisplayTemperatureRelay->setInitialCaption(caption);
     // Quiet mode channel
     haierQuietRelay = new Supla::Control::HaierVirtualRelay(
       std::bind(&HaierSmartair2Controller::setQuiet, &haierController, std::placeholders::_1),
@@ -587,6 +638,12 @@ void loop() {
 
   if (haierHealthRelay != nullptr) {
     haierHealthRelay->syncState();
+  }
+  if (haierPowerSavingRelay != nullptr) {
+    haierPowerSavingRelay->syncState();
+  }
+  if (haierDisplayTemperatureRelay != nullptr) {
+    haierDisplayTemperatureRelay->syncState();
   }
   
   if (haierPowerState != nullptr) {

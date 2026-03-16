@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include <cmath>
+#include <WiFi.h>
 #include <supla/log_wrapper.h> // required for logging in the controller
 #include <cstdio>
 #include <sstream>
@@ -36,14 +37,39 @@ void HaierSmartair2Controller::begin() {
                 std::placeholders::_2,
                 std::placeholders::_3,
                 std::placeholders::_4));
+  protocol_.set_answer_handler(
+      FrameType::REPORT_NETWORK_STATUS,
+      std::bind(&HaierSmartair2Controller::handleNetworkStatusAnswer_, this,
+                std::placeholders::_1,
+                std::placeholders::_2,
+                std::placeholders::_3,
+                std::placeholders::_4));
 
   // Fetch first status immediately to avoid stale default mode/fan states.
   sendStatusRequest_();
   last_status_request_ = std::chrono::steady_clock::now();
+  last_network_status_report_ = std::chrono::steady_clock::now();
 }
 
 void HaierSmartair2Controller::loop() {
   protocol_.loop();
+  processPowerSavingModeToggleSequence_();
+  processDisplayTemperatureToggleSequence_();
+
+  auto now = std::chrono::steady_clock::now();
+  const bool toggle_sequence_active = isAnyToggleSequenceActive_();
+
+  const auto network_status_elapsed =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          now - last_network_status_report_);
+  if (!toggle_sequence_active &&
+      network_status_elapsed >= network_status_report_interval_ &&
+      !protocol_.is_waiting_for_answer() &&
+      protocol_.get_outgoing_queue_size() == 0) {
+    sendNetworkStatusReport_();
+    last_network_status_report_ = now;
+    return;
+  }
 
   if (pending_settings_.valid && !control_send_requested_ &&
       !protocol_.is_waiting_for_answer() &&
@@ -57,12 +83,12 @@ void HaierSmartair2Controller::loop() {
     }
   }
 
-  auto now = std::chrono::steady_clock::now();
   auto elapsed =
       std::chrono::duration_cast<std::chrono::milliseconds>(now - last_status_request_);
 
   // Request AC status every 1 seconds
-  if (elapsed.count() > 1000 &&
+  if (!toggle_sequence_active &&
+      elapsed.count() > 1000 &&
       !protocol_.is_waiting_for_answer() &&
       protocol_.get_outgoing_queue_size() == 0) {
     sendStatusRequest_();
@@ -70,9 +96,30 @@ void HaierSmartair2Controller::loop() {
   }
 }
 
+void HaierSmartair2Controller::sendNetworkStatusReport_() {
+  const uint8_t payload[4] = {0x00, 0x00, 0x00, getWifiSignalStrength_()};
+  const HaierMessage network_status(FrameType::REPORT_NETWORK_STATUS, payload,
+                                    sizeof(payload));
+  protocol_.send_message(network_status, use_crc_);
+}
+
 void HaierSmartair2Controller::sendStatusRequest_() {
   static const HaierMessage STATUS_REQUEST(FrameType::CONTROL, 0x4D01);
   protocol_.send_message(STATUS_REQUEST, use_crc_);
+}
+
+HandlerError HaierSmartair2Controller::handleNetworkStatusAnswer_(
+    FrameType request_type,
+    FrameType message_type,
+    const uint8_t *data,
+    size_t data_size) {
+  if (request_type != FrameType::REPORT_NETWORK_STATUS) {
+    return HandlerError::UNEXPECTED_MESSAGE;
+  }
+  if (message_type != FrameType::CONFIRM || data_size != 0) {
+    return HandlerError::INVALID_ANSWER;
+  }
+  return HandlerError::HANDLER_OK;
 }
 
 void HaierSmartair2Controller::setPower(bool on) {
@@ -86,6 +133,19 @@ void HaierSmartair2Controller::setPower(bool on) {
 
 float HaierSmartair2Controller::getRoomTemperatureC() const {
   return room_temperature_c_;
+}
+
+uint8_t HaierSmartair2Controller::getWifiSignalStrength_() const {
+  const int32_t rssi = WiFi.RSSI();
+  if (rssi >= 0) {
+    return 0;
+  }
+
+  const int32_t magnitude = -rssi;
+  if (magnitude > 0xFF) {
+    return 0xFF;
+  }
+  return static_cast<uint8_t>(magnitude);
 }
 
 void HaierSmartair2Controller::setTargetTemperatureChangedCallback(
@@ -190,6 +250,123 @@ void HaierSmartair2Controller::notifyTargetTemperatureChanged_() {
   if (target_temperature_changed_callback_ && std::isfinite(set_point_)) {
     target_temperature_changed_callback_(set_point_);
   }
+}
+
+void HaierSmartair2Controller::triggerPowerSavingModeToggleSequence() {
+  power_saving_mode_toggle_sequence_.active = true;
+  power_saving_mode_toggle_sequence_.auto_mode_sent = false;
+  power_saving_mode_toggle_sequence_.next_health_mode = !health_mode_;
+  power_saving_mode_toggle_sequence_.toggles_remaining = 6;
+  power_saving_mode_toggle_sequence_.next_step_at = std::chrono::steady_clock::now();
+}
+
+bool HaierSmartair2Controller::isPowerSavingModeToggleSequenceActive() const {
+  return power_saving_mode_toggle_sequence_.active;
+}
+
+void HaierSmartair2Controller::triggerDisplayTemperatureToggleSequence() {
+  display_temperature_toggle_sequence_.active = true;
+  display_temperature_toggle_sequence_.next_display_status = !display_status_;
+  display_temperature_toggle_sequence_.toggles_remaining = 10;
+  display_temperature_toggle_sequence_.next_step_at = std::chrono::steady_clock::now();
+}
+
+bool HaierSmartair2Controller::isDisplayTemperatureToggleSequenceActive() const {
+  return display_temperature_toggle_sequence_.active;
+}
+
+bool HaierSmartair2Controller::isAnyToggleSequenceActive_() const {
+  return power_saving_mode_toggle_sequence_.active ||
+         display_temperature_toggle_sequence_.active;
+}
+
+void HaierSmartair2Controller::sendDisplayToggleStep_(bool on) {
+  if (!has_last_status_message_) {
+    return;
+  }
+
+  display_status_ = on;
+  sendControlNow();
+}
+
+void HaierSmartair2Controller::processPowerSavingModeToggleSequence_() {
+  auto &sequence = power_saving_mode_toggle_sequence_;
+  if (!sequence.active) {
+    return;
+  }
+
+  const auto now = std::chrono::steady_clock::now();
+  if (now < sequence.next_step_at) {
+    return;
+  }
+
+  if (pending_settings_.valid || control_send_requested_ ||
+      protocol_.is_waiting_for_answer() ||
+      protocol_.get_outgoing_queue_size() != 0) {
+    return;
+  }
+
+  if (!has_last_status_message_) {
+    sendStatusRequest_();
+    last_status_request_ = now;
+    sequence.next_step_at = now + power_saving_status_retry_interval_;
+    return;
+  }
+
+  if (!sequence.auto_mode_sent) {
+    setACMode(ConditioningMode::AUTO);
+    sequence.auto_mode_sent = true;
+    sequence.next_step_at = now + power_saving_toggle_interval_;
+    return;
+  }
+
+  if (sequence.toggles_remaining > 0) {
+    setHealthMode(sequence.next_health_mode);
+    sequence.next_health_mode = !sequence.next_health_mode;
+    --sequence.toggles_remaining;
+    sequence.next_step_at =
+        (sequence.toggles_remaining == 0) ? now : now + power_saving_toggle_interval_;
+    return;
+  }
+
+  sequence.active = false;
+}
+
+void HaierSmartair2Controller::processDisplayTemperatureToggleSequence_() {
+  auto &sequence = display_temperature_toggle_sequence_;
+  if (!sequence.active) {
+    return;
+  }
+
+  const auto now = std::chrono::steady_clock::now();
+  if (now < sequence.next_step_at) {
+    return;
+  }
+
+  if (pending_settings_.valid || control_send_requested_ ||
+      protocol_.is_waiting_for_answer() ||
+      protocol_.get_outgoing_queue_size() != 0) {
+    return;
+  }
+
+  if (!has_last_status_message_) {
+    sendStatusRequest_();
+    last_status_request_ = now;
+    sequence.next_step_at = now + display_temperature_status_retry_interval_;
+    return;
+  }
+
+  if (sequence.toggles_remaining > 0) {
+    sendDisplayToggleStep_(sequence.next_display_status);
+    sequence.next_display_status = !sequence.next_display_status;
+    --sequence.toggles_remaining;
+    sequence.next_step_at =
+        (sequence.toggles_remaining == 0) ? now
+                                          : now + display_temperature_toggle_interval_;
+    return;
+  }
+
+  sequence.active = false;
 }
 
 // Setters — update cached fields directly (no pending_settings_)
