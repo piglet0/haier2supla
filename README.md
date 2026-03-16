@@ -42,3 +42,8 @@ Compiled bin file for ESP32-C6 super mini board (LED GPIO15, BOOT button GPIO9)
 - added humidity reading
 - option to change pins of LED and config button in web config
 - bug fix
+## v0.2.2
+- OTA update
+- power-saving mode (command combo)
+- display value change (comand compo) - not confirmed
+- wifi icon on AC
