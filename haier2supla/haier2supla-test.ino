@@ -28,7 +28,7 @@
 #include <supla/sensor/virtual_thermometer.h>
 #include <supla/sensor/virtual_therm_hygro_meter.h>
 #include <supla/sensor/virtual_binary.h>
-#include "Haier2Supla/src/Haier2Supla.h"
+#include <Haier2Supla.h>
 
 // SUPLA components
 Supla::Eeprom eeprom;
