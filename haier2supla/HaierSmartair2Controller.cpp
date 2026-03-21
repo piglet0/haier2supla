@@ -285,8 +285,7 @@ void HaierSmartair2Controller::sendDisplayToggleStep_(bool on) {
     return;
   }
 
-  display_status_ = on;
-  sendControlNow();
+  setDisplayStatus(on);
 }
 
 void HaierSmartair2Controller::processPowerSavingModeToggleSequence_() {

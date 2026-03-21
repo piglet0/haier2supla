@@ -194,8 +194,8 @@ class HaierSmartair2Controller {
 
     std::chrono::milliseconds control_retry_interval_{500};
     std::chrono::milliseconds network_status_report_interval_{5000};
-    std::chrono::milliseconds power_saving_toggle_interval_{300};
+    std::chrono::milliseconds power_saving_toggle_interval_{760};
     std::chrono::milliseconds power_saving_status_retry_interval_{250};
-    std::chrono::milliseconds display_temperature_toggle_interval_{300};
+    std::chrono::milliseconds display_temperature_toggle_interval_{760};
     std::chrono::milliseconds display_temperature_status_retry_interval_{250};
 };

@@ -1,5 +1,5 @@
 #define AC_ROOM "Haier"
-#define FW_VERSION "0.2.2"
+#define FW_VERSION "0.2.3"
 #define FW_BUILD_INFO __DATE__ " " __TIME__
 
 #include <Arduino.h>
@@ -90,7 +90,7 @@ Supla::Control::HaierVirtualRelay *haierSwingHorizontalRelay = nullptr;
 Supla::Control::HaierVirtualRelay *haierSwingVerticalRelay = nullptr;
 Supla::Control::HaierVirtualRelay *haierHealthRelay = nullptr;
 Supla::Control::HaierActionVirtualRelay *haierPowerSavingRelay = nullptr;
-Supla::Control::HaierActionVirtualRelay *haierDisplayTemperatureRelay = nullptr;
+// Supla::Control::HaierActionVirtualRelay *haierDisplayTemperatureRelay = nullptr;
 Supla::Control::HaierVirtualRelay *haierDisplayRelay = nullptr;
 Supla::Control::HaierVirtualRelay *haierQuietRelay = nullptr;
 HaierAcHvacChannel *haierHvac = nullptr;
@@ -437,6 +437,7 @@ if (interfaceLvl >= 2) {
     haierPowerSavingRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
     snprintf(caption, sizeof(caption), "%s-Power Saving Toggle", roomName);
     haierPowerSavingRelay->setInitialCaption(caption);
+    /*
     haierDisplayTemperatureRelay = new Supla::Control::HaierActionVirtualRelay(
       std::bind(&HaierSmartair2Controller::triggerDisplayTemperatureToggleSequence, &haierController),
       std::bind(&HaierSmartair2Controller::isDisplayTemperatureToggleSequenceActive, &haierController)
@@ -444,6 +445,7 @@ if (interfaceLvl >= 2) {
     haierDisplayTemperatureRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
     snprintf(caption, sizeof(caption), "%s-Display Temp Toggle", roomName);
     haierDisplayTemperatureRelay->setInitialCaption(caption);
+    */
     // Quiet mode channel
     haierQuietRelay = new Supla::Control::HaierVirtualRelay(
       std::bind(&HaierSmartair2Controller::setQuiet, &haierController, std::placeholders::_1),
@@ -642,9 +644,11 @@ void loop() {
   if (haierPowerSavingRelay != nullptr) {
     haierPowerSavingRelay->syncState();
   }
+  /*
   if (haierDisplayTemperatureRelay != nullptr) {
     haierDisplayTemperatureRelay->syncState();
   }
+  */
   
   if (haierPowerState != nullptr) {
     haierController.getPower() ? haierPowerState->set() : haierPowerState->clear();

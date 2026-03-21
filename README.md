@@ -21,6 +21,9 @@ Version
   - standard - all AC modes, Fan modes and temperature setting
   - debug - additional sensor channels showing state of AC functions
 Note that change of interface level requires removing device from supla cloud and registration with new channels.
+## OTA Update
+For the first install upload 4MB file haier2supla-v0.0.0-merged.bin
+For OTA update (available in web config) use smaller file haier2supla-v0.0.0.bin 
 # Compilation
 Project was compiled in VSCode with Arduino Maker plugin. It can be also compiled in Arduino IDE.
 ## Libraries
@@ -47,3 +50,5 @@ Compiled bin file for ESP32-C6 super mini board (LED GPIO15, BOOT button GPIO9)
 - power-saving mode (command combo)
 - display value change (comand compo) - not confirmed
 - wifi icon on AC
+## v0.2.3
+- removed display value change - not working
