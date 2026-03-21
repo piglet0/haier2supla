@@ -71,6 +71,7 @@ HaierSmartair2Controller haierController(
     HAIER_UART_BAUD,
   false   // use_crc = false - CRC is not used by SmartAir2, and enabling it would require changes in the protocol handler to not expect CRC bytes
 );
+HaierSuplaStateSync haierStateSync(&haierController);
 
 // Supla::Control::HaierVirtualRelay *haierPower = nullptr;
 Supla::Control::HaierVirtualRelayWithArgOn<Supla::haier::smartair2_protocol::ConditioningMode> *haierCoolRelay = nullptr;
@@ -412,6 +413,20 @@ void setup() {
     snprintf(caption, sizeof(caption), "%s-Vertical Swing", roomName);
     haierSwingVerticalRelay->setInitialCaption(caption);
 
+    haierStateSync.registerLevel1(
+      haierCoolRelay,
+      haierHeatRelay,
+      haierDryRelay,
+      haierFanRelay,
+      haierAutoRelay,
+      haierFanHighRelay,
+      haierFanMidRelay,
+      haierFanLowRelay,
+      haierFanAutoRelay,
+      haierSwingHorizontalRelay,
+      haierSwingVerticalRelay,
+      haierTemperatureHumidity);
+
 
 // interface level 2 adds mode and fan controls, temperature setpoint control, and combined temperature/humidity sensor
 
@@ -458,6 +473,13 @@ if (interfaceLvl >= 2) {
     haierDisplayRelay->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
     snprintf(caption, sizeof(caption), "%s-Disable Display", roomName);
     haierDisplayRelay->setInitialCaption(caption);
+
+    haierStateSync.registerLevel2(
+      haierHealthRelay,
+      haierPowerSavingRelay,
+      nullptr,
+      haierDisplayRelay,
+      haierQuietRelay);
   }
 
   // Level 3 (Debug): Add all remaining channels
@@ -576,6 +598,29 @@ if (interfaceLvl >= 2) {
       haierTempIncrease->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
       snprintf(caption, sizeof(caption), " -1°C < %s Set Temp > +1°C", roomName);
       haierTempIncrease->setInitialCaption(caption);
+
+      haierStateSync.registerLevel3(
+        haierPowerState,
+        haierSetTemperature,
+        haierModeCool,
+        haierModeHeat,
+        haierModeDry,
+        haierModeAuto,
+        haierModeFan,
+        haierFanHigh,
+        haierFanMid,
+        haierFanLow,
+        haierFanAuto,
+        haierTurbo,
+        haierQuiet,
+        haierDisplay,
+        haierLockRemote,
+        haierHealth,
+        haierCompressor,
+        haierTenDegree,
+        haierUseSwingBits,
+        haierHorizontalSwing,
+        haierVerticalSwing);
   }
 }
 
@@ -583,144 +628,6 @@ void loop() {
   haierController.loop();
   SuplaDevice.iterate();
 
-  // Update channels based on availability (nullptr check handles interface level)
-
-
-  // Minimal level: Power only
-  /*
-  if (haierPower != nullptr) {
-    haierPower->syncState();
-  }
-  */
-
-  // Application level: Power + Mode relays
-  if (haierCoolRelay != nullptr) {
-    haierCoolRelay->syncState();
-  }
-  if (haierHeatRelay != nullptr) {
-    haierHeatRelay->syncState();
-  }
-  if (haierDryRelay != nullptr) {
-    haierDryRelay->syncState();
-  }
-  if (haierFanRelay != nullptr) {
-    haierFanRelay->syncState();
-  }
-  if (haierAutoRelay != nullptr) {
-    haierAutoRelay->syncState();
-  }
-  if (haierFanHighRelay != nullptr) {
-    haierFanHighRelay->syncState();
-  }
-  if (haierFanMidRelay != nullptr) {
-    haierFanMidRelay->syncState();
-  }
-  if (haierFanLowRelay != nullptr) {
-    haierFanLowRelay->syncState();
-  }
-  if (haierFanAutoRelay != nullptr) {
-    haierFanAutoRelay->syncState();
-  }
-  if (haierDisplayRelay != nullptr) {
-    haierDisplayRelay->syncState();
-  }
-  if (haierQuietRelay != nullptr) {
-    haierQuietRelay->syncState();
-  }
-  if (haierSwingHorizontalRelay != nullptr) {
-    haierSwingHorizontalRelay->syncState();
-  }
-  if (haierSwingVerticalRelay != nullptr) {
-    haierSwingVerticalRelay->syncState();
-  }
-
-  if (haierHealthRelay != nullptr) {
-    haierHealthRelay->syncState();
-  }
-  if (haierPowerSavingRelay != nullptr) {
-    haierPowerSavingRelay->syncState();
-  }
-  /*
-  if (haierDisplayTemperatureRelay != nullptr) {
-    haierDisplayTemperatureRelay->syncState();
-  }
-  */
-  
-  if (haierPowerState != nullptr) {
-    haierController.getPower() ? haierPowerState->set() : haierPowerState->clear();
-  }
-  
-  if (haierTemperatureHumidity != nullptr) {
-    float roomTemp = haierController.getRoomTemperatureC();
-    if (isfinite(roomTemp)) {
-      haierTemperatureHumidity->setTemp(roomTemp);
-    }
-    haierTemperatureHumidity->setHumi(haierController.getRoomHumidity());
-  }
-  if (haierSetTemperature != nullptr) {
-    float targetTemp = haierController.getTargetTemperatureC();
-    if (isfinite(targetTemp)) {
-      haierSetTemperature->setValue(targetTemp);
-    }
-  }
-
-  if (haierModeCool != nullptr) {
-    haierController.getModeCool() ? haierModeCool->set() : haierModeCool->clear();
-  }
-  if (haierModeHeat != nullptr) {
-    haierController.getModeHeat() ? haierModeHeat->set() : haierModeHeat->clear();
-  }
-  if (haierModeDry != nullptr) {
-    haierController.getModeDry() ? haierModeDry->set() : haierModeDry->clear();
-  }
-  if (haierModeAuto != nullptr) {
-    haierController.getModeAuto() ? haierModeAuto->set() : haierModeAuto->clear();
-  }
-  if (haierModeFan != nullptr) {
-    haierController.getModeFan() ? haierModeFan->set() : haierModeFan->clear();
-  }
-  if (haierFanHigh != nullptr) {
-    haierController.getFanHigh() ? haierFanHigh->set() : haierFanHigh->clear();
-  }
-  if (haierFanMid != nullptr) {
-    haierController.getFanMid() ? haierFanMid->set() : haierFanMid->clear();
-  }
-  if (haierFanLow != nullptr) {
-    haierController.getFanLow() ? haierFanLow->set() : haierFanLow->clear();
-  }
-  if (haierFanAuto != nullptr) {
-    haierController.getFanAuto() ? haierFanAuto->set() : haierFanAuto->clear();
-  } 
-  
-  if (haierTurbo != nullptr) {
-    haierController.getTurbo() ? haierTurbo->set() : haierTurbo->clear();
-  }
-  if (haierQuiet != nullptr) {
-    haierController.getQuiet() ? haierQuiet->set() : haierQuiet->clear();
-  }
-  if (haierDisplay != nullptr) {
-    haierController.getDisplayStatus() ? haierDisplay->set() : haierDisplay->clear();
-  }
-  if (haierLockRemote != nullptr) {
-    haierController.getLockRemote() ? haierLockRemote->set() : haierLockRemote->clear();
-  }
-  if (haierHealth != nullptr) {
-    haierController.getHealthMode() ? haierHealth->set() : haierHealth->clear();
-  }
-  if (haierCompressor != nullptr) {
-    haierController.getCompressor() ? haierCompressor->set() : haierCompressor->clear();
-  }
-  if (haierTenDegree != nullptr) {
-    haierController.getTenDegree() ? haierTenDegree->set() : haierTenDegree->clear();
-  }
-  if (haierUseSwingBits != nullptr) {
-    haierController.getUseSwingBits() ? haierUseSwingBits->set() : haierUseSwingBits->clear();
-  }
-  if (haierHorizontalSwing != nullptr) {
-    haierController.getHorizontalSwing() ? haierHorizontalSwing->set() : haierHorizontalSwing->clear();
-  }
-  if (haierVerticalSwing != nullptr) {
-    haierController.getVerticalSwing() ? haierVerticalSwing->set() : haierVerticalSwing->clear();
-  }
+  haierStateSync.iterate();
 
 }

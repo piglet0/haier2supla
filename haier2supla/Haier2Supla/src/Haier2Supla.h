@@ -5,3 +5,4 @@
 #include "HaierSmartair2Controller.h"
 #include "HaierAcVirtualRelay.h"
 #include "HaierAcHvacChannel.h"
+#include "HaierSuplaStateSync.h"
