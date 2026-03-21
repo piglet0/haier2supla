@@ -6,3 +6,4 @@
 #include "HaierAcVirtualRelay.h"
 #include "HaierAcHvacChannel.h"
 #include "HaierSuplaStateSync.h"
+#include "HaierSuplaChannels.h"
