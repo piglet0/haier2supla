@@ -1,15 +1,13 @@
-\
 #pragma once
 
-#include <supla/control/virtual_relay.h>
-#include "HaierSmartair2Controller.h"
 #include <functional>
+#include <supla/control/virtual_relay.h>
+
+#include "HaierSmartair2Controller.h"
 
 namespace Supla {
 namespace Control {
 
-// Virtual relay channel in SUPLA mapped to Haier AC power state.
-// obecnie nieużywany
 class HaierAcVirtualRelay : public VirtualRelay {
  public:
   explicit HaierAcVirtualRelay(HaierSmartair2Controller *controller,
@@ -25,7 +23,6 @@ class HaierAcVirtualRelay : public VirtualRelay {
   HaierSmartair2Controller *controller_;
 };
 
-// Virtual relay that switches AC to COOL when turned on, and to AUTO when turned off.
 class HaierAcCoolVirtualRelay : public VirtualRelay {
  public:
   explicit HaierAcCoolVirtualRelay(HaierSmartair2Controller *controller,
@@ -41,9 +38,6 @@ class HaierAcCoolVirtualRelay : public VirtualRelay {
   HaierSmartair2Controller *controller_;
 };
 
-// Generic virtual relay that calls user-supplied getter/setter functions.
-// T is the argument type accepted by the setter. The relay stores the
-// values to use for on/off (onValue/offValue).
 template <typename T>
 class HaierVirtualRelayWithArg : public VirtualRelay {
  public:
@@ -87,8 +81,6 @@ class HaierVirtualRelayWithArg : public VirtualRelay {
   T offValue_;
 };
 
-// Virtual relay that only triggers setter on turnOn with onValue.
-// turnOff does nothing (no setter call).
 template <typename T>
 class HaierVirtualRelayWithArgOn : public VirtualRelay {
  public:
@@ -106,7 +98,6 @@ class HaierVirtualRelayWithArgOn : public VirtualRelay {
 
   void turnOff(_supla_int_t duration = 0) override {
     VirtualRelay::turnOff(duration);
-    // Do nothing - no setter call
   }
 
   bool isOn() override {
@@ -130,7 +121,6 @@ class HaierVirtualRelayWithArgOn : public VirtualRelay {
   T onValue_;
 };
 
-// Convenience bool specialization implemented in .cpp
 class HaierVirtualRelay : public VirtualRelay {
  public:
   HaierVirtualRelay(std::function<void(bool)> setter,
@@ -182,7 +172,6 @@ class HaierActionVirtualRelay : public VirtualRelay {
   std::function<void()> action_;
   std::function<bool()> getter_;
 };
-
 
 }  // namespace Control
 }  // namespace Supla

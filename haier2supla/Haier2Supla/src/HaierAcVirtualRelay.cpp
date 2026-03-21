@@ -1,4 +1,3 @@
-\
 #include "HaierAcVirtualRelay.h"
 
 namespace Supla {
@@ -39,7 +38,6 @@ void HaierAcVirtualRelay::syncState() {
   }
 }
 
-// HaierAcCoolVirtualRelay implementation
 HaierAcCoolVirtualRelay::HaierAcCoolVirtualRelay(HaierSmartair2Controller *controller,
                                                  _supla_int_t functions)
     : VirtualRelay(functions), controller_(controller) {}
@@ -75,11 +73,9 @@ void HaierAcCoolVirtualRelay::syncState() {
   }
 }
 
-
 }  // namespace Control
 }  // namespace Supla
 
-// HaierVirtualRelay (bool) implementation
 using namespace Supla::Control;
 
 HaierVirtualRelay::HaierVirtualRelay(std::function<void(bool)> setter,
@@ -111,4 +107,3 @@ void HaierVirtualRelay::syncState() {
     VirtualRelay::turnOff(0);
   }
 }
-

@@ -28,11 +28,7 @@
 #include <supla/sensor/virtual_thermometer.h>
 #include <supla/sensor/virtual_therm_hygro_meter.h>
 #include <supla/sensor/virtual_binary.h>
-#include "HaierSerialStream.h"
-#include "HaierAcHvacChannel.h"
-#include "HaierSmartair2Controller.h"
-#include "HaierAcVirtualRelay.h"
-#include "smartair2_packet.h"
+#include "Haier2Supla/src/Haier2Supla.h"
 
 // SUPLA components
 Supla::Eeprom eeprom;
