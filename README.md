@@ -1,5 +1,6 @@
 # haier2supla
 Implementation of HaierProtocol in Supla device. This is code for ESP32 to control Haier AC device via Supla. Current version is compatibile with SmartAir2 devices.
+Main project file is in **example/haier2supla** folder
 ## Base of the project - references
 Communication to Haier AC is developed by paveldn. He preapred a HaierProtocol library. Communication with Haier AC is based on his other project haier-esphome.
 - Supla-Device https://github.com/SUPLA/supla-device
@@ -21,6 +22,7 @@ Version
   - standard - all AC modes, Fan modes and temperature setting
   - debug - additional sensor channels showing state of AC functions
 Note that change of interface level requires removing device from supla cloud and registration with new channels.
+Interface level can be changed in the project sketch.
 ## OTA Update
 For the first install upload 4MB file haier2supla-v0.0.0-merged.bin
 For OTA update (available in web config) use smaller file haier2supla-v0.0.0.bin 
@@ -52,3 +54,6 @@ Compiled bin file for ESP32-C6 super mini board (LED GPIO15, BOOT button GPIO9)
 - wifi icon on AC
 ## v0.2.3
 - removed display value change - not working
+## v0.2.5
+- change to Arduino library
+- device name base on MAC to avoid same name for simillar boards
