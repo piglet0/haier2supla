@@ -1,4 +1,4 @@
-# Haier2Supla
+# Haier2Supla Library Documentation
 
 Haier2Supla is an Arduino library for ESP32 boards that integrates Haier air conditioners with SUPLA.
 
@@ -32,9 +32,7 @@ This library supports:
 
 - Haier SmartAir2 protocol
 
-This library does not claim support for:
-
-- Other Haier UART protocol variants
+This library does not support Hon protocol
 
 ## Main Components
 
@@ -59,49 +57,49 @@ All available channel identifiers are defined in `HaierSuplaChannelId`.
 
 ### Control Channels
 
-- `Hvac`
-- `ModeCoolRelay`
-- `ModeHeatRelay`
-- `ModeDryRelay`
-- `ModeFanRelay`
-- `ModeAutoRelay`
-- `FanAutoRelay`
-- `FanHighRelay`
-- `FanMidRelay`
-- `FanLowRelay`
-- `SwingHorizontalRelay`
-- `SwingVerticalRelay`
-- `HealthRelay`
-- `PowerSavingRelay`
-- `DisplayTemperatureRelay`
-- `QuietRelay`
-- `DisplayRelay`
-- `TargetTemperatureStepRelay`
+- `Hvac` - main control of the AC unit: on/off, temperature setting, room temperature and humidity sensor
+- `ModeCoolRelay` 			- AC Cool mode
+- `ModeHeatRelay`			- AC Heat mode
+- `ModeDryRelay`			- AC Dry mode
+- `ModeFanRelay`			- AC Fan only mode
+- `ModeAutoRelay`			- AC Auto mode
+- `FanAutoRelay`			- Fan Auto speed mode
+- `FanHighRelay`			- Fan High speed mode
+- `FanMidRelay`				- Fan Mid speed mode
+- `FanLowRelay`				- Fan Low speed mode
+- `SwingHorizontalRelay`	- Horizontal Swing	
+- `SwingVerticalRelay`		- Vertical Swing
+- `HealthRelay`				- Health mode
+- `PowerSavingRelay`		- Power saving mode (3 beeps at the end of sequence ON, 2 beeps OFF)
+- `DisplayTemperatureRelay`	- not used
+- `QuietRelay`				- Quite mode
+- `DisplayRelay`			- Disable Display
+- `TargetTemperatureStepRelay`	- alternative change of temperature setting
 
 ### Sensor and State Channels
 
-- `TemperatureHumidity` - required for HVAC channel
-- `PowerStateSensor`
-- `SetTemperatureSensor`
-- `ModeCoolSensor`
-- `ModeHeatSensor`
-- `ModeDrySensor`
-- `ModeAutoSensor`
-- `ModeFanSensor`
-- `FanHighSensor`
-- `FanMidSensor`
-- `FanLowSensor`
-- `FanAutoSensor`
-- `TurboSensor`
-- `QuietSensor`
-- `DisplaySensor`
-- `LockRemoteSensor`
-- `HealthSensor`
-- `CompressorSensor`
-- `TenDegreeSensor`
-- `UseSwingBitsSensor`
-- `HorizontalSwingSensor`
-- `VerticalSwingSensor`
+- `TemperatureHumidity` 	- room Temperature and Humidity (required for HVAC channel)
+- `PowerStateSensor`		- AC Power state
+- `SetTemperatureSensor`	- room Temperature sensor
+- `ModeCoolSensor`			- AC Cool mode state
+- `ModeHeatSensor`			- AC Heat mode state
+- `ModeDrySensor`			- AC Dry mode state
+- `ModeAutoSensor`			- AC Auto mode state
+- `ModeFanSensor`			- Fan Auto speed state
+- `FanHighSensor`			- Fan High speed state
+- `FanMidSensor`			- Fan Mid speed state
+- `FanLowSensor`			- Fan Low speed state
+- `FanAutoSensor`			- Fan Auto speed state
+- `TurboSensor`				- Fan Turbo mode state
+- `QuietSensor`				- Quite mode state
+- `DisplaySensor`			- Disable Display state
+- `LockRemoteSensor`		- Lock remote state
+- `HealthSensor`			- Health mode state
+- `CompressorSensor`		- Compressor state
+- `TenDegreeSensor`			- Ten Degree mode state
+- `UseSwingBitsSensor`		- Use Swing Bits sensor
+- `HorizontalSwingSensor`	- Horizontal Swing mode state
+- `VerticalSwingSensor`		- Vertical Swing mode state
 
 ## Level Configuration
 
@@ -166,6 +164,9 @@ If `roomName` is empty:
 
 The library includes the following examples:
 
+- `examples/Haier2Supla`
+	The main reference application for full integration Haier SmartAir2 device to Supla device and broader project-specific configuration.
+
 - `examples/ControllerOnly/`
 	Minimal controller-only example without SUPLA channel configuration.
 
@@ -174,8 +175,6 @@ The library includes the following examples:
 
 - `examples/Level1Only/`
 	Simplified SUPLA example that creates only level 1 channels and does not expose interface level selection in the web configuration.
-
-The workspace root sketch `haier2supla-test.ino` remains the main reference application for full integration and broader project-specific configuration.
 
 ## Installation
 
