@@ -35,6 +35,8 @@ enum class HaierSuplaChannelId {
   DisplayTemperatureRelay,
   QuietRelay,
   DisplayRelay,
+  TurboRelay,
+  TenDegreeRelay,
   PowerStateSensor,
   SetTemperatureSensor,
   ModeCoolSensor,
@@ -179,6 +181,7 @@ class HaierSuplaChannels {
         {HaierSuplaChannelId::DisplayRelay, nullptr},
     };
     static const HaierSuplaChannelDefinition kDefaultLevel3[] = {
+      {HaierSuplaChannelId::TurboRelay, nullptr},
         {HaierSuplaChannelId::PowerStateSensor, nullptr},
         {HaierSuplaChannelId::ModeCoolSensor, nullptr},
         {HaierSuplaChannelId::ModeHeatSensor, nullptr},
@@ -195,6 +198,7 @@ class HaierSuplaChannels {
         {HaierSuplaChannelId::LockRemoteSensor, nullptr},
         {HaierSuplaChannelId::HealthSensor, nullptr},
         {HaierSuplaChannelId::CompressorSensor, nullptr},
+        {HaierSuplaChannelId::TenDegreeRelay, nullptr},
         {HaierSuplaChannelId::TenDegreeSensor, nullptr},
         {HaierSuplaChannelId::UseSwingBitsSensor, nullptr},
         {HaierSuplaChannelId::HorizontalSwingSensor, nullptr},
@@ -542,6 +546,30 @@ class HaierSuplaChannels {
         }
         break;
 
+      case HaierSuplaChannelId::TurboRelay:
+        if (turbo_relay_ == nullptr) {
+          turbo_relay_ = new Supla::Control::HaierVirtualRelay(
+              std::bind(&HaierSmartair2Controller::setTurbo, controller_,
+                        std::placeholders::_1),
+              std::bind(&HaierSmartair2Controller::getTurbo, controller_));
+          turbo_relay_->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
+          setCaption_(turbo_relay_, definition.caption, "%s-Turbo Mode");
+        }
+        break;
+
+      case HaierSuplaChannelId::TenDegreeRelay:
+        if (ten_degree_relay_ == nullptr) {
+          ten_degree_relay_ = new Supla::Control::HaierVirtualRelay(
+              std::bind(&HaierSmartair2Controller::setTenDegree, controller_,
+                        std::placeholders::_1),
+              std::bind(&HaierSmartair2Controller::getTenDegree,
+                        controller_));
+          ten_degree_relay_->setDefaultFunction(SUPLA_CHANNELFNC_POWERSWITCH);
+          setCaption_(ten_degree_relay_, definition.caption,
+                      "%s-10C Mode");
+        }
+        break;
+
       case HaierSuplaChannelId::PowerStateSensor:
         if (power_state_ == nullptr) {
           power_state_ = new Supla::Sensor::VirtualBinary;
@@ -741,12 +769,13 @@ class HaierSuplaChannels {
     state_sync_.registerLevel2(health_relay_, power_saving_relay_,
                                display_temperature_relay_, display_relay_,
                                quiet_relay_);
-    state_sync_.registerLevel3(power_state_, set_temperature_, modeCool_,
-                               modeHeat_, modeDry_, modeAuto_, modeFan_,
-                               fanHigh_, fanMid_, fanLow_, fanAuto_, turbo_,
-                               quiet_, display_, lock_remote_, health_,
-                               compressor_, ten_degree_, use_swing_bits_,
-                               horizontal_swing_, vertical_swing_);
+    state_sync_.registerLevel3(turbo_relay_, ten_degree_relay_, power_state_,
+                   set_temperature_, modeCool_, modeHeat_,
+                   modeDry_, modeAuto_, modeFan_, fanHigh_,
+                   fanMid_, fanLow_, fanAuto_, turbo_, quiet_,
+                   display_, lock_remote_, health_, compressor_,
+                   ten_degree_, use_swing_bits_,
+                   horizontal_swing_, vertical_swing_);
   }
 
   HaierSmartair2Controller *controller_ = nullptr;
@@ -772,6 +801,8 @@ class HaierSuplaChannels {
   Supla::Control::HaierActionVirtualRelay *power_saving_relay_ = nullptr;
   Supla::Control::HaierActionVirtualRelay *display_temperature_relay_ = nullptr;
   Supla::Control::HaierVirtualRelay *display_relay_ = nullptr;
+  Supla::Control::HaierVirtualRelay *turbo_relay_ = nullptr;
+  Supla::Control::HaierVirtualRelay *ten_degree_relay_ = nullptr;
   Supla::Control::HaierVirtualRelay *quiet_relay_ = nullptr;
   Supla::Sensor::VirtualBinary *power_state_ = nullptr;
   Supla::Sensor::VirtualThermometer *set_temperature_ = nullptr;

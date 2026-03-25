@@ -53,6 +53,8 @@ class HaierSuplaStateSync {
   }
 
   void registerLevel3(
+      Supla::Control::HaierVirtualRelay *turboRelay,
+      Supla::Control::HaierVirtualRelay *tenDegreeRelay,
       Supla::Sensor::VirtualBinary *powerState,
       Supla::Sensor::VirtualThermometer *setTemperature,
       Supla::Sensor::VirtualBinary *modeCool,
@@ -74,6 +76,8 @@ class HaierSuplaStateSync {
       Supla::Sensor::VirtualBinary *useSwingBits,
       Supla::Sensor::VirtualBinary *horizontalSwing,
       Supla::Sensor::VirtualBinary *verticalSwing) {
+    turboRelay_ = turboRelay;
+    tenDegreeRelay_ = tenDegreeRelay;
     powerState_ = powerState;
     setTemperature_ = setTemperature;
     modeCool_ = modeCool;
@@ -150,6 +154,12 @@ class HaierSuplaStateSync {
     if (displayTemperatureRelay_ != nullptr) {
       displayTemperatureRelay_->syncState();
     }
+    if (turboRelay_ != nullptr) {
+      turboRelay_->syncState();
+    }
+    if (tenDegreeRelay_ != nullptr) {
+      tenDegreeRelay_->syncState();
+    }
 
     setBinaryState_(powerState_, controller_->getPower());
 
@@ -215,6 +225,8 @@ class HaierSuplaStateSync {
   Supla::Control::HaierActionVirtualRelay *powerSavingRelay_ = nullptr;
   Supla::Control::HaierActionVirtualRelay *displayTemperatureRelay_ = nullptr;
   Supla::Control::HaierVirtualRelay *displayRelay_ = nullptr;
+  Supla::Control::HaierVirtualRelay *turboRelay_ = nullptr;
+  Supla::Control::HaierVirtualRelay *tenDegreeRelay_ = nullptr;
   Supla::Control::HaierVirtualRelay *quietRelay_ = nullptr;
 
   Supla::Sensor::VirtualBinary *powerState_ = nullptr;

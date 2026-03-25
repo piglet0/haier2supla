@@ -1,5 +1,18 @@
+// Main reference example for the Haier2Supla Arduino library.
+//
+// Scope:
+// - demonstrates full SUPLA integration for Haier SmartAir2 units,
+// - exposes interface levels 1-3 with a broad set of control and state
+//   channels,
+// - supports web configuration for Wi-Fi, protocol settings, room name,
+//   hardware pins, interface level, and OTA update.
+//
+// This sketch is intended as the most complete example in the library. Use it
+// as the baseline for full-featured deployments or as a starting point for
+// custom variants derived from the complete SUPLA integration.
+
 #define AC_ROOM "Haier"
-#define FW_VERSION "0.2.5"
+#define FW_VERSION "0.3.0"
 #define FW_BUILD_INFO __DATE__ " " __TIME__
 
 #include <Arduino.h>
@@ -33,6 +46,7 @@
 #include <supla/sensor/virtual_binary.h>
 #include <Haier2Supla.h>
 
+// Global SUPLA runtime objects used by the device, storage, and web UI.
 // SUPLA components
 Supla::Eeprom eeprom;
 Supla::ESPWifi wifi;
@@ -41,6 +55,7 @@ Supla::LittleFsConfig configSupla;
 Supla::Device::StatusLed *statusLed = nullptr;
 Supla::Control::Button *buttonCfg = nullptr;
 
+// Keys used to store custom configuration values in persistent storage.
 // Configuration tags for custom parameters
 #define CFG_TAG_ROOM_NAME "room_name"
 #define CFG_TAG_RX_PIN "uart_rx_pin"
@@ -53,6 +68,7 @@ Supla::Control::Button *buttonCfg = nullptr;
 // Haier SmartAir2 over UART1
 HardwareSerial HaierSerial(1);
 
+// Default hardware and interface settings used before any stored overrides.
 // Default UART pin values (can be overridden from web config)
 constexpr uint8_t DEFAULT_STATUS_LED_PIN = 15;
 constexpr uint8_t DEFAULT_BUTTON_CFG_PIN = 9;
@@ -67,6 +83,7 @@ uint8_t buttonCfgPin = DEFAULT_BUTTON_CFG_PIN;
 uint8_t haierUartRxPin = DEFAULT_HAIER_UART_RX_PIN;
 uint8_t haierUartTxPin = DEFAULT_HAIER_UART_TX_PIN;
 
+// Core Haier controller and SUPLA channel bridge instances.
 HaierSmartair2Controller haierController(
     HaierSerial,
     DEFAULT_HAIER_UART_RX_PIN,  // Will be updated in setup()
@@ -78,6 +95,7 @@ HaierSuplaChannels haierSupla(&haierController);
 
 // Captions below are suffixes. When roomName is set, the final caption becomes
 // <roomName>-<caption>.
+// Level 1 exposes the main HVAC control and commonly used fan/swing actions.
 static const HaierSuplaChannelDefinition kLevel1Channels[] = {
     {HaierSuplaChannelId::Hvac, "HVAC"},
     {HaierSuplaChannelId::TemperatureHumidity, "Room Temp & Humidity"},
@@ -94,6 +112,7 @@ static const HaierSuplaChannelDefinition kLevel1Channels[] = {
     {HaierSuplaChannelId::SwingVerticalRelay, "Swing Vertical"},
   };
 
+// Level 2 adds secondary control features that are useful but not essential.
   static const HaierSuplaChannelDefinition kLevel2Channels[] = {
     {HaierSuplaChannelId::HealthRelay, "Health Mode"},
     {HaierSuplaChannelId::PowerSavingRelay, "Power Saving Toggle"},
@@ -101,7 +120,9 @@ static const HaierSuplaChannelDefinition kLevel1Channels[] = {
     {HaierSuplaChannelId::DisplayRelay, "Display Disable"},
   };
 
+// Level 3 adds diagnostic/state channels and advanced control relays.
   static const HaierSuplaChannelDefinition kLevel3Channels[] = {
+    {HaierSuplaChannelId::TurboRelay, "Turbo Mode"},
     {HaierSuplaChannelId::PowerStateSensor, "Power State"},
     {HaierSuplaChannelId::ModeCoolSensor, "State Cool"},
     {HaierSuplaChannelId::ModeHeatSensor, "State Heat"},
@@ -118,6 +139,7 @@ static const HaierSuplaChannelDefinition kLevel1Channels[] = {
     {HaierSuplaChannelId::LockRemoteSensor, "State Remote Lock"},
     {HaierSuplaChannelId::HealthSensor, "State Health"},
     {HaierSuplaChannelId::CompressorSensor, "State Compressor"},
+    {HaierSuplaChannelId::TenDegreeRelay, "10C Mode"},
     {HaierSuplaChannelId::TenDegreeSensor, "State 10C Mode"},
     {HaierSuplaChannelId::UseSwingBitsSensor, "State Swing Enabled"},
     {HaierSuplaChannelId::HorizontalSwingSensor, "State Horizontal Swing"},
@@ -129,6 +151,7 @@ static const HaierSuplaChannelDefinition kLevel1Channels[] = {
 static HaierSuplaChannelConfig buildHaierChannelConfig() {
   HaierSuplaChannelConfig config = makeHaierSuplaChannelConfig();
 
+  // Register which channel definitions belong to each supported interface level.
   // The helper supports additional levels as well, but this sketch exposes
   // only levels 1-3 through the web configuration selector below.
   setHaierSuplaChannelLevel(
@@ -150,12 +173,14 @@ static HaierSuplaChannelConfig buildHaierChannelConfig() {
 static const HaierSuplaChannelConfig kHaierChannelConfig =
     buildHaierChannelConfig();
 
+// Builds the legacy MAC suffix format used by earlier auto-generated names.
 static void buildLegacyEfuseMacSuffix(char *suffix, size_t suffixSize) {
   const unsigned long long efuseMac =
       static_cast<unsigned long long>(ESP.getEfuseMac());
   snprintf(suffix, suffixSize, "%012llX", efuseMac & 0xFFFFFFFFFFFFULL);
 }
 
+// Reads the base MAC address and falls back to efuse MAC when needed.
 static void buildMacSuffix(char *suffix, size_t suffixSize) {
 #if defined(ESP32) || defined(SUPLA_DEVICE_ESP32)
   uint8_t baseMac[6] = {};
@@ -170,12 +195,14 @@ static void buildMacSuffix(char *suffix, size_t suffixSize) {
   snprintf(suffix, suffixSize, "%012llX", efuseMac & 0xFFFFFFFFFFFFULL);
 }
 
+// Generates the current default device name based on the device MAC address.
 static void buildDefaultDeviceName(char *deviceName, size_t deviceNameSize) {
   char macSuffix[13] = {};
   buildMacSuffix(macSuffix, sizeof(macSuffix));
   snprintf(deviceName, deviceNameSize, "Supla2Haier-%s", macSuffix);
 }
 
+// Reproduces the legacy device-name format for migration checks.
 static void buildLegacyEfuseDeviceName(char *deviceName,
                                        size_t deviceNameSize) {
   char macSuffix[13] = {};
@@ -183,6 +210,7 @@ static void buildLegacyEfuseDeviceName(char *deviceName,
   snprintf(deviceName, deviceNameSize, "Supla2Haier-%s", macSuffix);
 }
 
+// Converts the compiler month abbreviation into a numeric month value.
 static uint8_t parseBuildMonth(const char *buildDate) {
   static const char *const months[] = {"Jan", "Feb", "Mar", "Apr",
                                        "May", "Jun", "Jul", "Aug",
@@ -197,6 +225,7 @@ static uint8_t parseBuildMonth(const char *buildDate) {
   return 0;
 }
 
+// Builds a compact firmware version string that includes the build timestamp.
 static void buildCompactSwVersion(char *swVersion, size_t swVersionSize) {
   const char *buildDate = __DATE__;
   const char *buildTime = __TIME__;
@@ -210,6 +239,7 @@ static void buildCompactSwVersion(char *swVersion, size_t swVersionSize) {
            year, month, day, hour, minute);
 }
 
+// Detects names created by earlier auto-naming logic so they can be refreshed.
 static bool isLegacyAutoDeviceName(const char *deviceName) {
   if (strncmp(deviceName, "Haier2Supla_", 12) == 0) {
     return true;
@@ -220,13 +250,16 @@ static bool isLegacyAutoDeviceName(const char *deviceName) {
   return strcmp(deviceName, legacyDeviceName) == 0;
 }
 
+// Initializes storage, web configuration, SUPLA services, and the Haier bridge.
 void setup() {
   Serial.begin(115200);
   delay(2000); // Wait for serial to initialize
 
+  // Load persisted configuration before creating SUPLA and UART objects.
   Supla::Storage::Init();
   auto cfg = Supla::Storage::ConfigInstance();
 
+  // Restore user-defined room name, pins, and interface level when available.
   char roomName[11] = {};
   const bool hasStoredRoomName =
       cfg && cfg->getString(CFG_TAG_ROOM_NAME, roomName, sizeof(roomName));
@@ -263,6 +296,7 @@ void setup() {
   haierUartRxPin = static_cast<uint8_t>(rxPin);
   haierUartTxPin = static_cast<uint8_t>(txPin);
 
+  // Refresh persisted auto-generated names when they come from older formats.
   char deviceName[SUPLA_DEVICE_NAME_MAXSIZE] = {};
   const bool hasStoredDeviceName = cfg && cfg->getDeviceName(deviceName);
   if (!hasStoredDeviceName || isLegacyAutoDeviceName(deviceName)) {
@@ -302,12 +336,14 @@ void setup() {
   SUPLA_LOG_DEBUG("Firmware version: %s, build: %s", FW_VERSION,
                   FW_BUILD_INFO);
 
+  // Create hardware helpers for status indication and entering config mode.
   statusLed = new Supla::Device::StatusLed(statusLedPin, false);
 
   // config button to reset WiFi and other settings
   buttonCfg = new Supla::Control::Button(buttonCfgPin, true, true);
   buttonCfg->configureAsConfigButton(&SuplaDevice);
 
+  // Register built-in and custom pages for the SUPLA web configuration UI.
   // SUPLA web configuration
   new Supla::Html::DeviceInfo(&SuplaDevice);
   new Supla::Html::WifiParameters;
@@ -330,6 +366,7 @@ void setup() {
   interfaceLevel->registerValue("Standard", 2);
   interfaceLevel->registerValue("Debug", 3);
 
+  // Start SUPLA services and then initialize the Haier UART bridge.
   SuplaDevice.setInitialMode(Supla::InitialMode::StartInCfgMode);
   SuplaDevice.begin();
 
@@ -341,7 +378,9 @@ void setup() {
   haierSupla.begin(roomName, interfaceLvl, kHaierChannelConfig);
 }
 
+// Keeps the Haier controller and SUPLA state synchronization running.
 void loop() {
+  // Keep the controller protocol, SUPLA runtime, and channel state sync active.
   haierController.loop();
   SuplaDevice.iterate();
 

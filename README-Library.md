@@ -74,6 +74,8 @@ All available channel identifiers are defined in `HaierSuplaChannelId`.
 - `DisplayTemperatureRelay`	- not used
 - `QuietRelay`				- Quite mode
 - `DisplayRelay`			- Disable Display
+- `TurboRelay`				- Turbo mode
+- `TenDegreeRelay`			- 10 degree mode
 - `TargetTemperatureStepRelay`	- alternative change of temperature setting
 
 ### Sensor and State Channels
@@ -181,3 +183,8 @@ The library includes the following examples:
 Copy the `Haier2Supla` directory into your Arduino `libraries` folder.
 
 After installation, restart Arduino IDE if needed so the new library and examples are detected.
+
+# Changelog
+## v.0.8.0
+- added trubo and 10deg mode
+- improved examples

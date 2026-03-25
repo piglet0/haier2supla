@@ -34,7 +34,7 @@ Project requries following libriaries to be installed:
 - HaierProtocol - install from the Arduino catalogue
 ## Compilation settings
 - USB CDC On Boot: Enabled - to allow Logs displayed in board USB serial (115200 bound rate)
-- Partition scheme: Huge APP (3MB No OTA, 1MB SPIFFS)
+- Partition scheme: Minimal SPIFFS (1.9MB APP with OTA/ 128KB SPIFFS)
 ## release
 Compiled bin file for ESP32-C6 super mini board (LED GPIO15, BOOT button GPIO9)
 # Change log
@@ -57,3 +57,6 @@ Compiled bin file for ESP32-C6 super mini board (LED GPIO15, BOOT button GPIO9)
 ## v0.2.5
 - change to Arduino library
 - device name base on MAC to avoid same name for simillar boards
+## v0.3.0
+- checked examples, comments added
+- added turbo mode and 10deg mode in debug interface level
