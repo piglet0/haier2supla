@@ -57,6 +57,7 @@ Compiled bin file for ESP32-C6 super mini board (LED GPIO15, BOOT button GPIO9)
 ## v0.2.5
 - change to Arduino library
 - device name base on MAC to avoid same name for simillar boards
-## v0.3.0
+## v0.8.0
 - checked examples, comments added
 - added turbo mode and 10deg mode in debug interface level
+- unified version numbering with library

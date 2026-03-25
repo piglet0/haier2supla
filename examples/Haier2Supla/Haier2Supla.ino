@@ -12,7 +12,7 @@
 // custom variants derived from the complete SUPLA integration.
 
 #define AC_ROOM "Haier"
-#define FW_VERSION "0.3.0"
+#define FW_VERSION "0.8.0"
 #define FW_BUILD_INFO __DATE__ " " __TIME__
 
 #include <Arduino.h>
